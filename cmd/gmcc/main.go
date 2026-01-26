@@ -9,7 +9,7 @@ import (
 	"gmcc/internal/config"
 	"gmcc/internal/protocol"
 	"gmcc/internal/tui"
-	"gmcc/internal/logger"
+	"gmcc/pkg/logger"
 )
 
 func main() {
@@ -56,9 +56,8 @@ func main() {
 			return
 		}
 		logger.Infof("服务器地址: %s", addr)
-		tui.Push(tui.MsgUpdateStatus{ Addr: addr,} )
+		tui.Push(tui.MsgUpdateStatus{Addr: addr})
 		tui.Push(tui.MsgUpdateUserID(cfg.Account.PlayerID))
-
 
 		path := filepath.Join(
 			exeDir,
@@ -68,11 +67,11 @@ func main() {
 
 		tui.Push(tui.MsgUpdateImage(path))
 
-		protocol.Startmc(addr) 
-		
+		protocol.Startmc(addr)
+
 		// 5. 如果 Start 返回了，说明连接断了，更新一下 UI 状态
 		tui.Push(tui.MsgUpdateStatus{Addr: "已断开"})
-		
+
 	}()
 
 	tui.Start()

@@ -1,9 +1,9 @@
 package protocol
 
 import (
-	"gmcc/internal/logger"
-	"gmcc/internal/protocol/connection"
-	"gmcc/internal/protocol/stage"
+	"gmcc/pkg/logger"
+	"gmcc/pkg/protocol/connection"
+	"gmcc/pkg/protocol/stage"
 	"net"
 	"strconv"
 	"time"
@@ -26,7 +26,7 @@ func Startmc(target string) {
 		logger.Errorf("连接失败: %v", err)
 		return
 	}
-	
+
 	// 3. 初始化状态机
 	// NewStateMachine 内部会调用 NewConn(conn)，从而初始化 bufio
 	sm := connection.NewStateMachine(conn)

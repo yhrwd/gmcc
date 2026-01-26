@@ -26,10 +26,10 @@ type Skin struct {
 
 // 披风信息结构体
 type Cape struct {
-	ID          string `json:"id"`          // 披风 ID
-	State       string `json:"state"`       // 状态（ACTIVE 表示活跃）
-	URL         string `json:"url"`         // 披风纹理 URL
-	Alias       string `json:"alias"`       // 别名（如 Migrator）
+	ID    string `json:"id"`    // 披风 ID
+	State string `json:"state"` // 状态（ACTIVE 表示活跃）
+	URL   string `json:"url"`   // 披风纹理 URL
+	Alias string `json:"alias"` // 别名（如 Migrator）
 }
 
 // 错误响应结构体（请求失败时解析返回的错误信息）

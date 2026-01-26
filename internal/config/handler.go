@@ -10,9 +10,9 @@ import (
 
 // Config 全局配置结构体
 type Config struct {
-	Account AccountConfig  `yaml:"account"`
-	Server  ServerSetting  `yaml:"server"`
-	Log     LogConfig         `yaml:"log"`
+	Account AccountConfig `yaml:"account"`
+	Server  ServerSetting `yaml:"server"`
+	Log     LogConfig     `yaml:"log"`
 }
 
 // AccountConfig 账号配置

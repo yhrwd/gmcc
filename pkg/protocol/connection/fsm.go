@@ -2,11 +2,12 @@ package connection
 
 import (
 	"context"
+	"crypto/cipher"
 	"fmt"
 	"net"
 	"sync"
-	
-	"gmcc/internal/logger"
+
+	"gmcc/pkg/logger"
 )
 
 // ===== 连接状态枚举 =====
@@ -57,35 +58,34 @@ type IWorld interface {
 
 // ConnContext 共享状态/信息
 type ConnContext struct {
-    // 底层连接与状态
-    conn   *Conn        // 底层网络连接
-    state  ConnState    // 当前连接状态
-    sm     *StateMachine // 状态机实例
-    encryptStream cipher.Stream
+	// 底层连接与状态
+	Conn          *Conn         // 底层网络连接
+	State         ConnState     // 当前连接状态
+	SM            *StateMachine // 状态机实例
+	EncryptStream cipher.Stream
 
-    // 连接元数据
-    addr                string // 服务器地址
-    protocolVersion     int    // 协议版本号
-    compressionThreshold int   // 压缩阈值 (-1 为禁用)
-    sharedSecret        []byte // 加密密钥 (登录阶段)
+	// 连接元数据
+	Addr                 string // 服务器地址
+	ProtocolVersion      int    // 协议版本号
+	CompressionThreshold int    // 压缩阈值 (-1 为禁用)
+	SharedSecret         []byte // 加密密钥 (登录阶段)
 
-    // 游戏实体引用
-    player IPlayer // 当前玩家
-    world  IWorld  // 当前世界
+	// 游戏实体引用
+	Player IPlayer // 当前玩家
+	World  IWorld  // 当前世界
 
-    // 生命周期管理
-    ctx    context.Context    // 用于控制连接退出
-    cancel context.CancelFunc // 取消函数
+	// 生命周期管理
+	Ctx    context.Context    // 用于控制连接退出
+	Cancel context.CancelFunc // 取消函数
 
-    // 并发控制锁
-    readMu  sync.Mutex // 保护读操作 (SetReadDeadline + Read)
-    writeMu sync.Mutex // 保护写操作 (发包必须串行)
-    
-    // 状态切换保护
-    stateMu   sync.Mutex // 保护 state 和 switching 的访问
-    switching bool       // 是否正在执行状态切换 (防递归/并发)
+	// 并发控制锁
+	ReadMu  sync.Mutex // 保护读操作 (SetReadDeadline + Read)
+	WriteMu sync.Mutex // 保护写操作 (发包必须串行)
+
+	// 状态切换保护
+	StateMu   sync.Mutex // 保护 state 和 switching 的访问
+	Switching bool       // 是否正在执行状态切换 (防递归/并发)
 }
-
 
 // 一个状态必须实现的行为
 type State interface {
@@ -108,9 +108,9 @@ type State interface {
 
 // StateMachine 管理连接的状态流转
 type StateMachine struct {
-	ctx *ConnContext          // 连接上下文
+	ctx *ConnContext // 连接上下文
 
-	mu     sync.RWMutex       // 读写锁：读多写少场景下比 Mutex 性能更好
+	mu     sync.RWMutex        // 读写锁：读多写少场景下比 Mutex 性能更好
 	states map[ConnState]State // 状态注册表
 }
 
@@ -119,14 +119,14 @@ func NewStateMachine(rawConn net.Conn) *StateMachine {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 这里使用 NewConn 包装原始连接，初始化 bufio.Reader/Writer
-	wrappedConn := NewConn(rawConn) 
+	wrappedConn := NewConn(rawConn)
 
 	connCtx := &ConnContext{
-		Conn:   wrappedConn,
-		State:  StateHandshake,
-		Ctx:    ctx,
-		Cancel: cancel,
-        ProtocolVersion: 773, // 默认1.20.10
+		Conn:            wrappedConn,
+		State:           StateHandshake,
+		Ctx:             ctx,
+		Cancel:          cancel,
+		ProtocolVersion: 773, // 默认1.20.10
 	}
 
 	sm := &StateMachine{
@@ -168,48 +168,48 @@ func (sm *StateMachine) Start() error {
 // Switch 切换到下一个状态
 // 这是核心方法，负责状态的平滑过渡
 func (sm *StateMachine) Switch(nextState ConnState) error {
-    sm.ctx.writeMu.Lock()         // 用 writeMu 当全局切换锁（因为发包也用它）
-    defer sm.ctx.writeMu.Unlock()
+	sm.ctx.WriteMu.Lock() // 用 WriteMu 当全局切换锁（因为发包也用它）
+	defer sm.ctx.WriteMu.Unlock()
 
-    if sm.ctx.switching {
-        return fmt.Errorf("state switch already in progress")
-    }
-    sm.ctx.switching = true
-    defer func() { sm.ctx.switching = false }()
+	if sm.ctx.Switching {
+		return fmt.Errorf("state switch already in progress")
+	}
+	sm.ctx.Switching = true
+	defer func() { sm.ctx.Switching = false }()
 
-    sm.mu.RLock()
-    current := sm.ctx.State
-    oldHandler, hasOld := sm.states[current]
-    newHandler, hasNew := sm.states[nextState]
-    sm.mu.RUnlock()
+	sm.mu.RLock()
+	current := sm.ctx.State
+	oldHandler, hasOld := sm.states[current]
+	newHandler, hasNew := sm.states[nextState]
+	sm.mu.RUnlock()
 
-    if !hasNew || newHandler == nil {
-        return fmt.Errorf("target state %s not registered", nextState)
-    }
+	if !hasNew || newHandler == nil {
+		return fmt.Errorf("target state %s not registered", nextState)
+	}
 
-    logger.Infof("Switching: %s → %s", current, nextState)
+	logger.Infof("Switching: %s → %s", current, nextState)
 
-    // 退出旧状态
-    if hasOld && oldHandler != nil {
-        if err := oldHandler.Exit(sm.ctx); err != nil {
-            logger.Errorf("exit %s error: %v", current, err)
-            // 不 return，继续尝试进入新状态
-        }
-    }
+	// 退出旧状态
+	if hasOld && oldHandler != nil {
+		if err := oldHandler.Exit(sm.ctx); err != nil {
+			logger.Errorf("exit %s error: %v", current, err)
+			// 不 return，继续尝试进入新状态
+		}
+	}
 
-    // 原子更新状态
-    sm.mu.Lock()
-    sm.ctx.State = nextState
-    sm.mu.Unlock()
+	// 原子更新状态
+	sm.mu.Lock()
+	sm.ctx.State = nextState
+	sm.mu.Unlock()
 
-    // 进入新状态
-    if err := newHandler.Enter(sm.ctx); err != nil {
-        logger.Infof("enter %s error: %v", nextState, err)
-        sm.Close()
-        return err
-    }
+	// 进入新状态
+	if err := newHandler.Enter(sm.ctx); err != nil {
+		logger.Infof("enter %s error: %v", nextState, err)
+		sm.Close()
+		return err
+	}
 
-    return nil
+	return nil
 }
 
 // HandlePacket 分发数据包给当前状态处理
@@ -263,5 +263,5 @@ func (sm *StateMachine) GetCurrentState() ConnState {
 }
 
 func (sm *StateMachine) Context() context.Context {
-    return sm.ctx.Ctx
+	return sm.ctx.Ctx
 }

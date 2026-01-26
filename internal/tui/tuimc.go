@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/shlex"
 
-	"gmcc/internal/fileprocess"
-	"gmcc/internal/logger"
+	"gmcc/pkg/fileprocess"
+	"gmcc/pkg/logger"
 )
 
 // ----------------------------------------------------------------------------
@@ -108,22 +108,22 @@ func wrapText(text string, width int) string {
 	if width <= 0 {
 		return text
 	}
-	
+
 	var result strings.Builder
 	lines := strings.Split(text, "\n")
-	
+
 	for i, line := range lines {
 		if i > 0 {
 			result.WriteString("\n")
 		}
-		
+
 		// 处理 ANSI 转义序列的长度计算
 		visibleLen := lipgloss.Width(line)
 		if visibleLen <= width {
 			result.WriteString(line)
 			continue
 		}
-		
+
 		// 逐字符切割（简单实现）
 		currentWidth := 0
 		for _, r := range line {
@@ -136,7 +136,7 @@ func wrapText(text string, width int) string {
 			currentWidth += charWidth
 		}
 	}
-	
+
 	return result.String()
 }
 
@@ -144,16 +144,15 @@ func (m *model) updateViewport() {
 	if m.vp.Width <= 0 || m.vp.Height <= 0 {
 		return
 	}
-	
+
 	wrappedLines := make([]string, len(m.logs))
 	for i, line := range m.logs {
 		wrappedLines[i] = wrapText(line, m.vp.Width)
 	}
-	
+
 	m.vp.SetContent(strings.Join(wrappedLines, "\n"))
 	m.vp.GotoBottom()
 }
-
 
 // ----------------------------------------------------------------------------
 // 命令系统
@@ -168,9 +167,9 @@ type Command struct {
 var commands map[string]Command
 
 func init() {
-    logger.SetUILogFunc(func(msg string) {
-    	Push(MsgLog(msg))
-    })
+	logger.SetUILogFunc(func(msg string) {
+		Push(MsgLog(msg))
+	})
 
 	commands = map[string]Command{
 		"help":   {Name: "help", Description: "显示帮助", Run: cmdHelp},

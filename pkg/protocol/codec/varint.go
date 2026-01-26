@@ -5,15 +5,11 @@ import (
 	"io"
 )
 
-// ===== VarInt 32 =====
-
-// ReadVarInt 从 io.Reader 读取 varint 32
 func ReadVarInt(r io.Reader) (int32, error) {
 	var num int32
 	var shift uint
 	buf := make([]byte, 1)
-
-	for i := 0; i < 5; i++ { // 32位VarInt最多5字节
+	for i := 0; i < 5; i++ {
 		if _, err := r.Read(buf); err != nil {
 			return 0, err
 		}
@@ -27,7 +23,6 @@ func ReadVarInt(r io.Reader) (int32, error) {
 	return 0, fmt.Errorf("varint too big")
 }
 
-// WriteVarInt 写 VarInt 32
 func WriteVarInt(w io.Writer, num int32) error {
 	buf := make([]byte, 0, 5)
 	for {

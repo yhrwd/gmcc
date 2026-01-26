@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"gmcc/internal/crypto"
+	"gmcc/pkg/crypto"
 )
 
 // const clientId = ""
@@ -452,7 +452,7 @@ func RefreshToken(playerID string) error {
 	v.Set("client_id", CLIENT_ID)
 	v.Set("grant_type", "refresh_token")
 	v.Set("refresh_token", stored.RefreshToken)
-	
+
 	tokenURL := fmt.Sprintf(TOKEN_CHECK_URL, TENANT)
 	resp, err := http.PostForm(tokenURL, v)
 	if err != nil {

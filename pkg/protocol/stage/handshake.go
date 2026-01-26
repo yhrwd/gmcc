@@ -3,9 +3,9 @@ package stage
 import (
 	"bytes"
 	"encoding/binary"
-	"gmcc/internal/logger"
-	"gmcc/internal/protocol/connection"
-	"gmcc/internal/protocol/codec"
+	"gmcc/pkg/logger"
+	"gmcc/pkg/protocol/codec"
+	"gmcc/pkg/protocol/connection"
 )
 
 type ClientHandshakeState struct {
@@ -27,7 +27,7 @@ func (s *ClientHandshakeState) Enter(ctx *connection.ConnContext) error {
 // HandlePacket: 握手状态下，客户端通常不会收到服务器的包，除非是错误
 func (s *ClientHandshakeState) HandlePacket(ctx *connection.ConnContext, packet any) error {
 	logger.Warnf("[HANDSHAKE] Unexpected packet received: %v", packet)
-	
+
 	payload := &bytes.Buffer{}
 
 	// 1. 构造 Handshake Payload
@@ -37,12 +37,12 @@ func (s *ClientHandshakeState) HandlePacket(ctx *connection.ConnContext, packet 
 	codec.WriteVarInt(payload, 1) // Next State: 1 (Status)
 
 	// 2. 包装 Packet ID (0x00)
-	packet := &bytes.Buffer{}
-	codec.WriteVarInt(packet, 0x00) // Packet ID
-	packet.Write(payload.Bytes())
+	pkt := &bytes.Buffer{}
+	codec.WriteVarInt(pkt, 0x00) // Packet ID
+	pkt.Write(payload.Bytes())
 
-	// 3. 安全发送 (使用 writeMu 保护)
-	if err := ctx.WriteRaw(packet.Bytes()); err != nil {
+	// 3. 安全发送 (使用 WriteMu 保护)
+	if err := ctx.WriteRaw(pkt.Bytes()); err != nil {
 		return err
 	}
 
@@ -50,8 +50,6 @@ func (s *ClientHandshakeState) HandlePacket(ctx *connection.ConnContext, packet 
 
 	// 4. 发送完握手包后，立即切换状态
 	return ctx.SM.Switch(connection.StateStatus)
-	
-	return nil
 }
 
 func (s *ClientHandshakeState) Exit(ctx *connection.ConnContext) error {

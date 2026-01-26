@@ -3,6 +3,7 @@ package connection
 import (
 	"bufio"
 	"net"
+	"time"
 )
 
 type Conn struct {
@@ -23,4 +24,8 @@ func NewConn(c net.Conn) *Conn {
 
 func (c *Conn) Close() error {
 	return c.Raw.Close()
+}
+
+func (c *Conn) SetWriteDeadline(t time.Time) error {
+	return c.Raw.SetWriteDeadline(t)
 }

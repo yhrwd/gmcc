@@ -1,23 +1,24 @@
 package auth
+
 import (
-  "gmcc/internal/crypto"
-  "gmcc/internal/logger"
-  "time"
-  "fmt"
+	"fmt"
+	"gmcc/pkg/crypto"
+	"gmcc/pkg/logger"
+	"time"
 )
 
 func TimeStampToBeijingTime(ts int64) string {
- 	// 加载上海时区（北京时间）
- 	loc, err := time.LoadLocation("Asia/Shanghai")
- 	if err != nil {
- 		// 加载失败时使用 UTC 作为 fallback
- 		loc = time.UTC
- 	}
- 	// 时间戳转 time.Time
- 	t := time.Unix(ts, 0).In(loc)
- 	// 格式化
- 	return t.Format("2006-01-02 15:04:05")
- }
+	// 加载上海时区（北京时间）
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		// 加载失败时使用 UTC 作为 fallback
+		loc = time.UTC
+	}
+	// 时间戳转 time.Time
+	t := time.Unix(ts, 0).In(loc)
+	// 格式化
+	return t.Format("2006-01-02 15:04:05")
+}
 
 var mcToken string
 
@@ -30,7 +31,7 @@ func LoginAccount(playeriid string) (string, error) {
 
 	if err == nil && time.Now().Unix() < mcCache.ExpiresAt {
 		logger.Info("使用缓存的 MC token")
-		logger.Info("MC token过期时间:",TimeStampToBeijingTime(int64(mcCache.ExpiresAt)))
+		logger.Info("MC token过期时间:", TimeStampToBeijingTime(int64(mcCache.ExpiresAt)))
 		mcToken = mcCache.AccessToken
 	} else {
 		logger.Info("MC token 不存在或已过期，执行 MS 登录...")
@@ -38,7 +39,7 @@ func LoginAccount(playeriid string) (string, error) {
 		// 2. 检查并获取 MS Token
 		var msStored StoredToken
 		msErr := crypto.LoadToken(playerID+"_ms.token", &msStored)
-		
+
 		var msAccessToken string
 		if msErr == nil {
 			// 尝试刷新 MS Token
@@ -62,18 +63,28 @@ func LoginAccount(playeriid string) (string, error) {
 
 		// 3. 走完整流程获取 MC Token
 		xblToken, uhs, err := GetXBLAccess(msAccessToken)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 
 		xstsToken, uhs, err := GetXSTSToken(xblToken)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 
 		mcToken, err = GetMinecraftToken(playerID, xstsToken, uhs)
-		if err != nil { return "", err }
-		
+		if err != nil {
+			return "", err
+		}
+
 		// 4. 最终检查所有权
-    	owns, err := HasMinecraftOwnership(mcToken)
-    	if err != nil { return "", err }
-    	if !owns { return "",fmt.Errorf("该账户未拥有 Minecraft") }
+		owns, err := HasMinecraftOwnership(mcToken)
+		if err != nil {
+			return "", err
+		}
+		if !owns {
+			return "", fmt.Errorf("该账户未拥有 Minecraft")
+		}
 	}
 
 	logger.Info("登录成功")
