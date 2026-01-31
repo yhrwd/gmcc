@@ -1,2 +1,3 @@
 # gmcc
-Go:  Console Minecraft Client
+
+Go: Console Minecraft Client
