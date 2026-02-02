@@ -1,5 +1,3 @@
-// Package crypto provides encryption and decryption utilities for Go applications.
-// It includes both symmetric and asymmetric encryption implementations with proper error handling.
 package crypto
 
 import (

@@ -1,7 +1,4 @@
-// Package gob provides utilities for encoding and decoding Go data structures
-// using the gob encoding format. It includes functions for file I/O operations
-// and byte slice conversions with proper error handling.
-package gob
+package rwfile
 
 import (
 	"bytes"

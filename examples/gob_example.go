@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"gmcc/pkg/gob"
+	"gmcc/pkg/file"
 )
 
 // Person 是一个示例结构体，用于演示gob编码/解码
@@ -36,7 +36,7 @@ func main() {
 	person1 := Person{Name: "Alice", Age: 30, City: "Beijing"}
 
 	// 写入到文件
-	err := gob.WriteToGobFile("person.gob", person1)
+	err := rwfile.WriteToGobFile("person.gob", person1)
 	if err != nil {
 		log.Fatal("写入失败:", err)
 	}
@@ -44,7 +44,7 @@ func main() {
 
 	// 从文件读取
 	var loadedPerson Person
-	err = gob.ReadFromGobFile("person.gob", &loadedPerson)
+	err = rwfile.ReadFromGobFile("person.gob", &loadedPerson)
 	if err != nil {
 		log.Fatal("读取失败:", err)
 	}
@@ -55,7 +55,7 @@ func main() {
 	person2 := Person{Name: "Bob", Age: 25, City: "Shanghai"}
 
 	// 编码为字节切片
-	data, err := gob.EncodeToBytes(person2)
+	data, err := rwfile.EncodeToBytes(person2)
 	if err != nil {
 		log.Fatal("编码失败:", err)
 	}
@@ -63,7 +63,7 @@ func main() {
 
 	// 从字节切片解码
 	var decodedPerson Person
-	err = gob.DecodeFromBytes(data, &decodedPerson)
+	err = rwfile.DecodeFromBytes(data, &decodedPerson)
 	if err != nil {
 		log.Fatal("解码失败:", err)
 	}
@@ -73,12 +73,13 @@ func main() {
 	fmt.Println("\n=== 示例3: 追加数据到文件 ===")
 	// 使用相同类型的数据进行演示
 	numbers := []int{1, 2, 3}
-	err = gob.WriteToGobFile("multiple.gob", numbers)
+	err = rwfile.WriteToGobFile("multiple.gob", numbers)
 	if err != nil {
 		log.Fatal("写入失败:", err)
 	}
 
 	// 追加更多相同类型的数据
+	err = rwfile.AppendToGobFile("multiple.gob", []int{4, 5, 6})
 	if err != nil {
 		log.Fatal("追加失败:", err)
 	}
@@ -86,7 +87,7 @@ func main() {
 
 	// 读取最后一条记录
 	var lastRecord []int
-	err = gob.ReadLastFromGobFile("multiple.gob", &lastRecord)
+	err = rwfile.ReadLastFromGobFile("multiple.gob", &lastRecord)
 	if err != nil {
 		log.Fatal("读取最后记录失败:", err)
 	}
@@ -97,13 +98,13 @@ func main() {
 	person3 := Person{Name: "Charlie", Age: 35, City: "Guangzhou"}
 
 	// 首先写入一些数据
-	err = gob.WriteToGobFile("person.gob", person1)
+	err = rwfile.WriteToGobFile("person.gob", person1)
 	if err != nil {
 		log.Fatal("写入失败:", err)
 	}
 
 	// 然后使用带备份的写入
-	err = gob.WriteToGobFileWithBackup("person.gob", person3)
+	err = rwfile.WriteToGobFileWithBackup("person.gob", person3)
 	if err != nil {
 		log.Fatal("带备份写入失败:", err)
 	}
@@ -116,7 +117,7 @@ func main() {
 
 	// 示例5: 获取文件大小
 	fmt.Println("\n=== 示例5: 获取文件大小 ===")
-	size, err := gob.GetGobFileSize("person.gob")
+	size, err := rwfile.GetGobFileSize("person.gob")
 	if err != nil {
 		log.Fatal("获取文件大小失败:", err)
 	}
