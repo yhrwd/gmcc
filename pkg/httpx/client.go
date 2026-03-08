@@ -1,4 +1,4 @@
-package network
+package httpx
 
 import (
 	"bytes"
@@ -41,22 +41,20 @@ func PostForm(rawURL string, form url.Values, ptr interface{}) (*HTTPResponse, e
 
 // PostJSONWithResponse 发送JSON格式的POST请求，并解析JSON响应到ptr，返回完整的响应信息
 func PostJSON(rawURL string, reqBody interface{}, ptr interface{}) (*HTTPResponse, error) {
-	// 序列化请求体
-	jsonBody, err := json.Marshal(reqBody)
+	req, err := newJSONPostRequest(rawURL, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("序列化JSON请求体失败：%w", err)
+		return nil, err
 	}
+	return doRequest(req, ptr)
+}
 
-	// 创建请求
-	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewReader(jsonBody))
+// PostJSONWithAuthHeader 发送带Authorization的JSON POST请求，并解析JSON响应到ptr
+func PostJSONWithAuthHeader(rawURL string, authToken string, reqBody interface{}, ptr interface{}) (*HTTPResponse, error) {
+	req, err := newJSONPostRequest(rawURL, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("创建HTTP请求失败：%w", err)
+		return nil, err
 	}
-
-	// 设置请求头
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
+	req.Header.Set("Authorization", authToken)
 	return doRequest(req, ptr)
 }
 
@@ -113,4 +111,23 @@ func GetWithAuthHeader(rawURL string, authToken string, ptr interface{}) (*HTTPR
 	req.Header.Set("Accept", "application/json")
 
 	return doRequest(req, ptr)
+}
+
+func newJSONPostRequest(rawURL string, reqBody interface{}) (*http.Request, error) {
+	// 序列化请求体
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("序列化JSON请求体失败：%w", err)
+	}
+
+	// 创建请求
+	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("创建HTTP请求失败：%w", err)
+	}
+
+	// 设置请求头
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	return req, nil
 }

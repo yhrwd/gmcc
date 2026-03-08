@@ -1,0 +1,55 @@
+package config
+
+// Config 包含程序的配置结构体定义，按照仓库根目录 config.yaml 的字段组织。
+type AccountConfig struct {
+	PlayerID        string `yaml:"player_id"`
+	UseOfficialAuth bool   `yaml:"use_official_auth"`
+}
+
+type ServerConfig struct {
+	Address string `yaml:"address"`
+}
+
+type ActionsConfig struct {
+	OnJoinCommands []string `yaml:"on_join_commands"`
+	OnJoinMessages []string `yaml:"on_join_messages"`
+	DelayMs        int      `yaml:"delay_ms"`
+}
+
+type LogConfig struct {
+	LogDir     string `yaml:"log_dir"`
+	MaxSize    int64  `yaml:"max_size"`
+	Debug      bool   `yaml:"debug"`
+	EnableFile bool   `yaml:"enable_file"`
+}
+
+type Config struct {
+	Account AccountConfig `yaml:"account"`
+	Server  ServerConfig  `yaml:"server"`
+	Actions ActionsConfig `yaml:"actions"`
+	Log     LogConfig     `yaml:"log"`
+}
+
+// Default 返回默认配置模板。
+func Default() Config {
+	return Config{
+		Account: AccountConfig{
+			PlayerID:        "your_player_id_here",
+			UseOfficialAuth: false,
+		},
+		Server: ServerConfig{
+			Address: "127.0.0.1:25565",
+		},
+		Actions: ActionsConfig{
+			OnJoinCommands: nil,
+			OnJoinMessages: nil,
+			DelayMs:        1200,
+		},
+		Log: LogConfig{
+			LogDir:     "logs",
+			MaxSize:    10,
+			Debug:      false,
+			EnableFile: true,
+		},
+	}
+}

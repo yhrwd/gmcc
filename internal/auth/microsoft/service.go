@@ -1,4 +1,4 @@
-package auth
+package microsoft
 
 import (
 	"bytes"
@@ -10,23 +10,21 @@ import (
 	"strings"
 	"time"
 
-	network "gmcc/pkg/network"
+	"gmcc/internal/logx"
+	"gmcc/pkg/httpx"
 )
 
 const (
-	MICROSOFT_TENANT    string        = "consumers"
-	MICROSOFT_CLIENT_ID string        = "feb3836f-0333-4185-8eb9-4cbf0498f947"
-	MAX_CHECK_TIME      time.Duration = 15 * time.Minute
+	MICROSOFT_TENANT    string = "consumers"
+	MICROSOFT_CLIENT_ID string = "feb3836f-0333-4185-8eb9-4cbf0498f947"
 )
 
 const (
-	DEVICE_CODE_URL     string = "https://login.microsoftonline.com/%s/oauth2/v2.0/devicecode"
-	TOKEN_CHECK_URL     string = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"
-	XBOX_LIVE_AUTH_URL  string = "https://user.auth.xboxlive.com/user/authenticate"
-	XSTS_URL            string = "https://xsts.auth.xboxlive.com/xsts/authorize"
+	DEVICE_CODE_URL    string = "https://login.microsoftonline.com/%s/oauth2/v2.0/devicecode"
+	TOKEN_CHECK_URL    string = "https://login.microsoftonline.com/%s/oauth2/v2.0/token"
+	XBOX_LIVE_AUTH_URL string = "https://user.auth.xboxlive.com/user/authenticate"
+	XSTS_URL           string = "https://xsts.auth.xboxlive.com/xsts/authorize"
 )
-
-func init() {}
 
 /* -------------------- Mircosoft Token -------------------- */
 type DeviceCodeResponse struct {
@@ -58,7 +56,7 @@ func getDeviceCode(clientID string) (*DeviceCodeResponse, error) {
 	form.Set("scope", "XboxLive.signin offline_access")
 
 	var resp DeviceCodeResponse
-	_, err := network.PostForm(
+	_, err := httpx.PostForm(
 		fmt.Sprintf(DEVICE_CODE_URL, MICROSOFT_TENANT),
 		form,
 		&resp,
@@ -85,7 +83,7 @@ func pollDeviceCodeToken(clientID string, devResp *DeviceCodeResponse) (*TokenRe
 
 	for time.Now().Before(deadline) {
 		var tokenResp TokenResponse
-		_, err := network.PostForm(fmt.Sprintf(TOKEN_CHECK_URL, MICROSOFT_TENANT), form, &tokenResp)
+		_, err := httpx.PostForm(fmt.Sprintf(TOKEN_CHECK_URL, MICROSOFT_TENANT), form, &tokenResp)
 
 		if err != nil && tokenResp.Error == "" {
 			return nil, err
@@ -118,12 +116,12 @@ func getMicrosoftToken() (*TokenResponse, error) {
 		return nil, err
 	}
 
-	fmt.Println("请在浏览器打开下面的链接并输入代码完成登录：")
+	logx.Infof("请在浏览器打开下面的链接并输入代码完成登录")
 	if devResp.VerificationURIComplete != "" {
-		fmt.Printf("自动链接: %s\n", devResp.VerificationURIComplete)
+		logx.Infof("自动链接: %s", devResp.VerificationURIComplete)
 	} else {
-		fmt.Printf("链接: %s\n", devResp.VerificationURI)
-		fmt.Printf("代码: %s\n", devResp.UserCode)
+		logx.Infof("链接: %s", devResp.VerificationURI)
+		logx.Infof("代码: %s", devResp.UserCode)
 	}
 
 	return pollDeviceCodeToken(MICROSOFT_CLIENT_ID, devResp)
@@ -136,7 +134,7 @@ func refreshMSToken(refreshToken string) (*TokenResponse, error) {
 	form.Set("refresh_token", refreshToken)
 	form.Set("scope", "XboxLive.signin offline_access")
 	var tokenResp TokenResponse
-	_, err := network.PostForm(fmt.Sprintf(TOKEN_CHECK_URL, MICROSOFT_TENANT), form, &tokenResp)
+	_, err := httpx.PostForm(fmt.Sprintf(TOKEN_CHECK_URL, MICROSOFT_TENANT), form, &tokenResp)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +172,7 @@ func getXBLToken(microsoftAccessToken string) (*XBLResponse, error) {
 	xblReq.RelyingParty = "http://auth.xboxlive.com"
 	xblReq.TokenType = "JWT"
 	var xblResp XBLResponse
-	_, err := network.PostJSON(XBOX_LIVE_AUTH_URL, xblReq, &xblResp)
+	_, err := httpx.PostJSON(XBOX_LIVE_AUTH_URL, xblReq, &xblResp)
 	if err != nil {
 		return nil, err
 	}
@@ -297,6 +295,10 @@ func getXSTSToken(xblToken string) (*XSTSResponse, error) {
 }
 
 func tokenWorkflow(microsoftToken *TokenResponse) (*XSTSResponse, error) {
+	if microsoftToken == nil || strings.TrimSpace(microsoftToken.AccessToken) == "" {
+		return nil, fmt.Errorf("微软令牌无效")
+	}
+
 	// 获取 Xbox Live 令牌
 	xblResp, err := getXBLToken(microsoftToken.AccessToken)
 	if err != nil {
@@ -313,6 +315,22 @@ func tokenWorkflow(microsoftToken *TokenResponse) (*XSTSResponse, error) {
 }
 
 /* -------------------- Final Token -------------------- */
+func GetMicrosoftToken() (*TokenResponse, error) {
+	return getMicrosoftToken()
+}
+
+func RefreshMicrosoftToken(refreshToken string) (*TokenResponse, error) {
+	return refreshMSToken(refreshToken)
+}
+
+func GetXSTSTokenFromMicrosoftToken(microsoftToken *TokenResponse) (*XSTSResponse, error) {
+	return tokenWorkflow(microsoftToken)
+}
+
+func GetXSTSTokenFromAccessToken(accessToken string) (*XSTSResponse, error) {
+	return tokenWorkflow(&TokenResponse{AccessToken: accessToken})
+}
+
 func GetToken() (*XSTSResponse, error) {
 	microsoftToken, err := getMicrosoftToken()
 	if err != nil {
@@ -322,8 +340,8 @@ func GetToken() (*XSTSResponse, error) {
 	return tokenWorkflow(microsoftToken)
 }
 
-func RefreshToken(refresh_token string) (*XSTSResponse, error) {
-	microsoftToken, err := refreshMSToken(refresh_token)
+func RefreshToken(refreshToken string) (*XSTSResponse, error) {
+	microsoftToken, err := refreshMSToken(refreshToken)
 	if err != nil {
 		return nil, err
 	}
