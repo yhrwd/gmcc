@@ -250,7 +250,7 @@ func readString(r io.ByteReader, rr io.Reader) (string, error) {
 	if _, err := io.ReadFull(rr, buf); err != nil {
 		return "", err
 	}
-	return string(buf), nil
+	return cesu8ToUTF8(buf), nil
 }
 
 func encodeString(s string) []byte {

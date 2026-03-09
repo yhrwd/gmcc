@@ -16,8 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tnze/go-mc/nbt"
-
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/logx"
 )
@@ -50,45 +48,6 @@ type signableCommandTarget struct {
 
 func (c *Client) SetChatHandler(handler func(ChatMessage)) {
 	c.chatHandler = handler
-}
-
-func (c *Client) GetCharacterAnalyzer() *CharacterAnalyzer {
-	return c.charAnalyzer
-}
-
-func (c *Client) AddCharacterMapping(unicodeStr, description, replaceWith string) error {
-	if c.charAnalyzer == nil {
-		return fmt.Errorf("字符映射分析器未初始化")
-	}
-	return c.charAnalyzer.AddMapping(unicodeStr, description, replaceWith)
-}
-
-func (c *Client) RemoveCharacterMapping(unicodeStr string) error {
-	if c.charAnalyzer == nil {
-		return fmt.Errorf("字符映射分析器未初始化")
-	}
-	return c.charAnalyzer.RemoveMapping(unicodeStr)
-}
-
-func (c *Client) SetCharacterReplaceEnabled(enabled bool) error {
-	if c.charAnalyzer == nil {
-		return fmt.Errorf("字符映射分析器未初始化")
-	}
-	return c.charAnalyzer.SetEnableReplace(enabled)
-}
-
-func (c *Client) SetShowUnicodeInfo(show bool) error {
-	if c.charAnalyzer == nil {
-		return fmt.Errorf("字符映射分析器未初始化")
-	}
-	return c.charAnalyzer.SetShowUnicodeInfo(show)
-}
-
-func (c *Client) GenerateCharacterMappingTemplate(outputPath string) error {
-	if c.charAnalyzer == nil {
-		return fmt.Errorf("字符映射分析器未初始化")
-	}
-	return c.charAnalyzer.GenerateMappingTemplate(outputPath)
 }
 
 func (c *Client) SendCommand(command string) error {
@@ -376,33 +335,19 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 }
 
 func (c *Client) emitChat(chat ChatMessage) {
-	originalText := chat.PlainText
-
-	// 应用字符替换
-	if c.charAnalyzer != nil {
-		chat.PlainText = c.charAnalyzer.ReplaceText(chat.PlainText)
-	}
-
 	if strings.TrimSpace(chat.PlainText) == "" && strings.TrimSpace(chat.RawJSON) != "" {
 		logx.Infof("收到聊天消息: type=%s sender=%s plain=<empty> raw=%s", chat.Type, chat.SenderUUID, shortString(chat.RawJSON, 180))
 	} else {
 		logx.Infof("收到聊天消息: type=%s sender=%s plain=%q", chat.Type, chat.SenderUUID, chat.PlainText)
 	}
+
 	if strings.TrimSpace(chat.RawJSON) != "" {
 		logx.Debugf("聊天 JSON: %s", chat.RawJSON)
 	}
-
-	// 显示Unicode字符信息
-	if c.charAnalyzer != nil {
-		if unicodeInfo := c.charAnalyzer.AnalyzeText(originalText); unicodeInfo != "" {
-			logx.Infof("%s", unicodeInfo)
-		}
-	}
-
 	// 检测未知字符（替换字符 �）
-	if strings.Contains(originalText, "�") {
+	if strings.Contains(chat.PlainText, "�") {
 		logx.Warnf("检测到未知字符，原始JSON: %s", chat.RawJSON)
-		logx.Debugf("PlainText with unknown chars: %q", originalText)
+		logx.Debugf("PlainText with unknown chars: %q", chat.PlainText)
 	}
 	if c.chatHandler != nil {
 		c.chatHandler(chat)
@@ -784,13 +729,13 @@ func discardN(r io.Reader, n int64) error {
 }
 
 func readAnonymousNBTJSON(r io.Reader) (string, error) {
-	var v any
-	dec := nbt.NewDecoder(r)
-	dec.NetworkFormat(true)
-	if _, err := dec.Decode(&v); err != nil {
+	dec := newNBTDecoder(r, true)
+	v, err := dec.decodeRoot()
+	if err != nil {
 		return "", err
 	}
-	raw, err := json.Marshal(v)
+
+	raw, err := json.Marshal(fixCESU8InValue(v))
 	if err != nil {
 		return "", err
 	}

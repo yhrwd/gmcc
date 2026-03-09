@@ -55,7 +55,6 @@ type Client struct {
 
 	lastAFKPacket time.Time
 	chatHandler   func(ChatMessage)
-	charAnalyzer  *CharacterAnalyzer
 	chatSessionOK bool
 	chatSession   *secureChatSession
 	commandSign   map[string]signableCommandTarget
@@ -71,13 +70,6 @@ func New(cfg *config.Config) *Client {
 		username:    name,
 		uuid:        offlineUUID(name),
 		commandSign: map[string]signableCommandTarget{},
-	}
-
-	charAnalyzer, err := InitializeCharacterMap(".charmap")
-	if err != nil {
-		logx.Warnf("初始化字符映射分析器失败: %v", err)
-	} else {
-		client.charAnalyzer = charAnalyzer
 	}
 
 	return client
