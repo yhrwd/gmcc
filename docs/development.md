@@ -49,10 +49,21 @@ The design follows the same ideas used by `node-minecraft-protocol`:
 
 ### `internal/mcclient`
 
-- `codec.go`: frame read/write, compression, AES/CFB8 stream.
-- `protocol_774.go`: packet IDs, protocol feature flags, packet-name map.
-- `client.go`: login/config/play state machine and AFK loop.
-- `chat.go`: message/command send + chat packet parsing + JSON extraction.
+- `codec.go`: frame read/write, compression, AES/CFB8 stream, CESU-8 string decoding
+- `protocol_774.go`: packet IDs, protocol feature flags, packet-name map
+- `client.go`: login/config/play state machine and AFK loop
+- `chat.go`: message/command send + chat packet parsing + JSON extraction
+- `nbt.go`: custom NBT decoder with CESU-8 support (replaces go-mc/nbt)
+- `chat_parser.go`: CESU-8 to UTF-8 conversion, chat JSON text extraction
+
+**CESU-8 Support:**
+
+Minecraft Java uses CESU-8 (Modified UTF-8) encoding where supplementary plane characters (emoji, rare CJK) are encoded as 6-byte surrogate pairs instead of standard UTF-8 4-byte sequences. The client automatically converts CESU-8 to UTF-8 when:
+
+- Reading protocol strings (`readString` in codec.go)
+- Decoding NBT strings (`readString` in nbt.go)
+
+This ensures Chinese characters, emoji, and other Unicode characters display correctly instead of showing as `\ufffd` replacement characters.
 
 ### `internal/logx`
 
