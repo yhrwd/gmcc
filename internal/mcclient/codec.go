@@ -115,7 +115,7 @@ func (c *packetConn) ReadPacket() (packet, error) {
 			data = uncompressed
 		}
 
-		logx.Debugf(
+		logx.PacketLogf(
 			"收包 frame: frameLen=%d compressed=%t threshold=%d uncompressedLen=%d framePreview=%s",
 			frameLen,
 			uncompressedLen != 0,
@@ -136,7 +136,7 @@ func (c *packetConn) ReadPacket() (packet, error) {
 	}
 
 	if c.compressionThreshold < 0 {
-		logx.Debugf(
+		logx.PacketLogf(
 			"收包 frame: frameLen=%d compressed=false threshold=%d uncompressedLen=%d framePreview=%s",
 			frameLen,
 			c.compressionThreshold,
@@ -173,7 +173,7 @@ func (c *packetConn) WritePacket(packetID int32, payload []byte) error {
 
 	raw := append(encodeVarInt(int32(len(frame))), frame...)
 
-	logx.Debugf(
+	logx.PacketLogf(
 		"发包: id=0x%02X payloadLen=%d bodyLen=%d frameLen=%d compressed=%t threshold=%d payloadPreview=%s",
 		packetID,
 		len(payload),
@@ -188,7 +188,7 @@ func (c *packetConn) WritePacket(packetID int32, payload []byte) error {
 	defer c.mu.Unlock()
 	_, err := c.w.Write(raw)
 	if err != nil {
-		logx.Debugf("发包失败: id=0x%02X err=%v", packetID, err)
+		logx.PacketLogf("发包失败: id=0x%02X err=%v", packetID, err)
 	}
 	return err
 }

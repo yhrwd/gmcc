@@ -55,6 +55,7 @@ type Client struct {
 
 	lastAFKPacket time.Time
 	chatHandler   func(ChatMessage)
+	charAnalyzer  *CharacterAnalyzer
 	chatSessionOK bool
 	chatSession   *secureChatSession
 	commandSign   map[string]signableCommandTarget
@@ -63,7 +64,7 @@ type Client struct {
 
 func New(cfg *config.Config) *Client {
 	name := strings.TrimSpace(cfg.Account.PlayerID)
-	return &Client{
+	client := &Client{
 		cfg:         cfg,
 		offlineName: name,
 		offlineUUID: offlineUUID(name),
@@ -71,6 +72,15 @@ func New(cfg *config.Config) *Client {
 		uuid:        offlineUUID(name),
 		commandSign: map[string]signableCommandTarget{},
 	}
+
+	charAnalyzer, err := InitializeCharacterMap(".charmap")
+	if err != nil {
+		logx.Warnf("初始化字符映射分析器失败: %v", err)
+	} else {
+		client.charAnalyzer = charAnalyzer
+	}
+
+	return client
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -167,7 +177,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 			return fmt.Errorf("读取数据包失败 (state=%s): %w", stateName(c.state), err)
 		}
 
-		logx.Debugf(
+		logx.PacketLogf(
 			"收到数据包: state=%s id=0x%02X (%s) len=%d",
 			stateName(c.state),
 			pkt.ID,
@@ -393,7 +403,7 @@ func (c *Client) handleLoginPacket(pkt packet) error {
 		return c.sendCookieResponse(loginServerCookieResp, key)
 
 	default:
-		logx.Debugf("未处理的 Login 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(stateLogin, pkt.ID), len(pkt.Data))
+		logx.PacketLogf("未处理的 Login 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(stateLogin, pkt.ID), len(pkt.Data))
 		return nil
 	}
 }
@@ -456,7 +466,7 @@ func (c *Client) handleConfigurationPacket(pkt packet) error {
 		return nil
 
 	default:
-		logx.Debugf("未处理的 Configuration 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(stateConfiguration, pkt.ID), len(pkt.Data))
+		logx.PacketLogf("未处理的 Configuration 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(stateConfiguration, pkt.ID), len(pkt.Data))
 		return nil
 	}
 }
@@ -538,7 +548,7 @@ func (c *Client) handlePlayPacket(pkt packet) error {
 		return nil
 
 	default:
-		logx.Debugf("未处理的 Play 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(statePlay, pkt.ID), len(pkt.Data))
+		logx.PacketLogf("未处理的 Play 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(statePlay, pkt.ID), len(pkt.Data))
 		return nil
 	}
 }
@@ -552,7 +562,7 @@ func (c *Client) sendHandshake(host string, port uint16) error {
 	binary.BigEndian.PutUint16(p[:], port)
 	payload = append(payload, p[:]...)
 	payload = append(payload, encodeVarInt(intentionLogin)...)
-	logx.Debugf("准备发送 Handshake: host=%s port=%d protocol=%d nextState=login", host, port, protocolVersion)
+	logx.PacketLogf("准备发送 Handshake: host=%s port=%d protocol=%d nextState=login", host, port, protocolVersion)
 
 	return c.conn.WritePacket(handshakingServerIntention, payload)
 }
@@ -561,7 +571,7 @@ func (c *Client) sendLoginStart() error {
 	payload := make([]byte, 0, 96)
 	payload = append(payload, encodeString(c.username)...)
 	payload = append(payload, c.uuid[:]...)
-	logx.Debugf("准备发送 Login Start: username=%s uuid=%s", c.username, formatUUID(c.uuid))
+	logx.PacketLogf("准备发送 Login Start: username=%s uuid=%s", c.username, formatUUID(c.uuid))
 	return c.conn.WritePacket(loginServerHello, payload)
 }
 

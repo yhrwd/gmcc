@@ -52,6 +52,45 @@ func (c *Client) SetChatHandler(handler func(ChatMessage)) {
 	c.chatHandler = handler
 }
 
+func (c *Client) GetCharacterAnalyzer() *CharacterAnalyzer {
+	return c.charAnalyzer
+}
+
+func (c *Client) AddCharacterMapping(unicodeStr, description, replaceWith string) error {
+	if c.charAnalyzer == nil {
+		return fmt.Errorf("字符映射分析器未初始化")
+	}
+	return c.charAnalyzer.AddMapping(unicodeStr, description, replaceWith)
+}
+
+func (c *Client) RemoveCharacterMapping(unicodeStr string) error {
+	if c.charAnalyzer == nil {
+		return fmt.Errorf("字符映射分析器未初始化")
+	}
+	return c.charAnalyzer.RemoveMapping(unicodeStr)
+}
+
+func (c *Client) SetCharacterReplaceEnabled(enabled bool) error {
+	if c.charAnalyzer == nil {
+		return fmt.Errorf("字符映射分析器未初始化")
+	}
+	return c.charAnalyzer.SetEnableReplace(enabled)
+}
+
+func (c *Client) SetShowUnicodeInfo(show bool) error {
+	if c.charAnalyzer == nil {
+		return fmt.Errorf("字符映射分析器未初始化")
+	}
+	return c.charAnalyzer.SetShowUnicodeInfo(show)
+}
+
+func (c *Client) GenerateCharacterMappingTemplate(outputPath string) error {
+	if c.charAnalyzer == nil {
+		return fmt.Errorf("字符映射分析器未初始化")
+	}
+	return c.charAnalyzer.GenerateMappingTemplate(outputPath)
+}
+
 func (c *Client) SendCommand(command string) error {
 	cmd := strings.TrimSpace(command)
 	cmd = strings.TrimPrefix(cmd, "/")
@@ -337,6 +376,13 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 }
 
 func (c *Client) emitChat(chat ChatMessage) {
+	originalText := chat.PlainText
+
+	// 应用字符替换
+	if c.charAnalyzer != nil {
+		chat.PlainText = c.charAnalyzer.ReplaceText(chat.PlainText)
+	}
+
 	if strings.TrimSpace(chat.PlainText) == "" && strings.TrimSpace(chat.RawJSON) != "" {
 		logx.Infof("收到聊天消息: type=%s sender=%s plain=<empty> raw=%s", chat.Type, chat.SenderUUID, shortString(chat.RawJSON, 180))
 	} else {
@@ -344,6 +390,19 @@ func (c *Client) emitChat(chat ChatMessage) {
 	}
 	if strings.TrimSpace(chat.RawJSON) != "" {
 		logx.Debugf("聊天 JSON: %s", chat.RawJSON)
+	}
+
+	// 显示Unicode字符信息
+	if c.charAnalyzer != nil {
+		if unicodeInfo := c.charAnalyzer.AnalyzeText(originalText); unicodeInfo != "" {
+			logx.Infof("%s", unicodeInfo)
+		}
+	}
+
+	// 检测未知字符（替换字符 �）
+	if strings.Contains(originalText, "�") {
+		logx.Warnf("检测到未知字符，原始JSON: %s", chat.RawJSON)
+		logx.Debugf("PlainText with unknown chars: %q", originalText)
 	}
 	if c.chatHandler != nil {
 		c.chatHandler(chat)
@@ -777,82 +836,6 @@ func readU8(r io.Reader) (byte, error) {
 		return 0, err
 	}
 	return b[0], nil
-}
-
-func extractPlainTextFromChatJSON(rawJSON string) string {
-	if strings.TrimSpace(rawJSON) == "" {
-		return ""
-	}
-	var node any
-	if err := json.Unmarshal([]byte(rawJSON), &node); err != nil {
-		return ""
-	}
-	var parts []string
-	collectChatText(node, &parts)
-	return strings.TrimSpace(strings.Join(parts, ""))
-}
-
-func collectChatText(node any, parts *[]string) {
-	switch v := node.(type) {
-	case string:
-		if strings.TrimSpace(v) != "" {
-			*parts = append(*parts, v)
-		}
-	case bool, float64, int64, int32, int16, int8, uint64, uint32, uint16, uint8:
-		*parts = append(*parts, fmt.Sprint(v))
-	case []any:
-		for _, item := range v {
-			collectChatText(item, parts)
-		}
-	case map[string]any:
-		if text, ok := v["text"].(string); ok {
-			if strings.TrimSpace(text) != "" {
-				*parts = append(*parts, text)
-			}
-		}
-		if tr, ok := v["translate"].(string); ok {
-			// translate key 也保留，至少不丢语义
-			*parts = append(*parts, "["+tr+"]")
-		}
-		if selector, ok := v["selector"].(string); ok {
-			if strings.TrimSpace(selector) != "" {
-				*parts = append(*parts, selector)
-			}
-		}
-		if keybind, ok := v["keybind"].(string); ok {
-			if strings.TrimSpace(keybind) != "" {
-				*parts = append(*parts, keybind)
-			}
-		}
-		if insertion, ok := v["insertion"].(string); ok {
-			if strings.TrimSpace(insertion) != "" {
-				*parts = append(*parts, insertion)
-			}
-		}
-		if score, ok := v["score"].(map[string]any); ok {
-			if val, ok := score["value"]; ok {
-				collectChatText(val, parts)
-			} else if name, ok := score["name"]; ok {
-				collectChatText(name, parts)
-			}
-		}
-		if with, ok := v["with"].([]any); ok {
-			for _, item := range with {
-				collectChatText(item, parts)
-			}
-		}
-		if extra, ok := v["extra"].([]any); ok {
-			for _, item := range extra {
-				collectChatText(item, parts)
-			}
-		}
-		if content, ok := v["content"]; ok {
-			collectChatText(content, parts)
-		}
-		if separator, ok := v["separator"]; ok {
-			collectChatText(separator, parts)
-		}
-	}
 }
 
 func shortString(s string, max int) string {

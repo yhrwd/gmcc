@@ -14,6 +14,8 @@ var (
 	consoleLogger = log.New(os.Stdout, "", log.Ltime)
 	fileLogger    *log.Logger
 	fileWriter    *rotatingFileWriter
+	packetLogger  *log.Logger
+	packetWriter  *rotatingFileWriter
 	debugEnabled  bool
 )
 
@@ -32,6 +34,13 @@ func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 		}
 		fileWriter = w
 		fileLogger = log.New(fileWriter, "", log.LstdFlags)
+
+		pw, err := newRotatingFileWriter(filepath.Join(logDir, "packets"), maxSize)
+		if err != nil {
+			return err
+		}
+		packetWriter = pw
+		packetLogger = log.New(packetWriter, "", log.LstdFlags)
 	}
 	return nil
 }
@@ -62,6 +71,14 @@ func Debugf(format string, args ...interface{}) {
 	}
 }
 
+func PacketLogf(format string, args ...interface{}) {
+	mu.Lock()
+	defer mu.Unlock()
+	if packetLogger != nil {
+		packetLogger.Printf("[PACKET] "+format, args...)
+	}
+}
+
 func logfLocked(level, format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -78,12 +95,24 @@ func writeLocked(level, format string, args ...interface{}) {
 
 func closeLocked() error {
 	fileLogger = nil
-	if fileWriter == nil {
-		return nil
+	packetLogger = nil
+	var errs []error
+	if fileWriter != nil {
+		if err := fileWriter.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		fileWriter = nil
 	}
-	err := fileWriter.Close()
-	fileWriter = nil
-	return err
+	if packetWriter != nil {
+		if err := packetWriter.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		packetWriter = nil
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("close errors: %v", errs)
+	}
+	return nil
 }
 
 type rotatingFileWriter struct {

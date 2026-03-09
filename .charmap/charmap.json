@@ -1,0 +1,18 @@
+{
+  "enable_replace": false,
+  "show_unicode_info": true,
+  "mappings": {
+    "\\uE000": {
+      "description": "Minecraft 私用区字符示例 1",
+      "replace_with": "█"
+    },
+    "\\uE001": {
+      "description": "Minecraft 私用区字符示例 2",
+      "replace_with": "▓"
+    },
+    "\\uE002": {
+      "description": "Minecraft 私用区字符示例 3",
+      "replace_with": "▒"
+    }
+  }
+}
