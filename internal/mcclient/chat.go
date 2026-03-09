@@ -567,6 +567,7 @@ func (c *Client) handleDeclareCommandsPacket(data []byte) error {
 			}
 			node.Name = name
 			node.ParserID = parserID
+			logx.Debugf("命令参数节点[%d]: name=%s parserID=%d type=%d", i, name, parserID, nodeType)
 		}
 
 		nodes[i] = node
@@ -582,9 +583,9 @@ func (c *Client) handleDeclareCommandsPacket(data []byte) error {
 	c.commandSign = targets
 	c.chatSignMu.Unlock()
 
-	logx.Debugf("已解析 declare_commands: signableCommands=%d", len(targets))
-	if say, ok := targets["say"]; ok {
-		logx.Debugf("命令签名规则: /say arg=%s sliceIndex=%d", say.ArgumentName, say.SliceIndex)
+	logx.Debugf("已解析 declare_commands: nodes=%d signableCommands=%d", nodeCount, len(targets))
+	for cmd, target := range targets {
+		logx.Debugf("命令签名规则: /%s arg=%s sliceIndex=%d", cmd, target.ArgumentName, target.SliceIndex)
 	}
 	return nil
 }
