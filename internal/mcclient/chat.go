@@ -141,13 +141,22 @@ func (c *Client) runOnJoinActionsAsync() {
 	}
 	time.Sleep(time.Duration(delay) * time.Millisecond)
 
+	signCmds := c.cfg.Actions.SignCommands
+
 	for _, cmd := range c.cfg.Actions.OnJoinCommands {
 		cmd = strings.TrimSpace(cmd)
 		if cmd == "" {
 			continue
 		}
 		cmd = strings.TrimPrefix(cmd, "/")
-		if err := c.SendCommand(cmd); err != nil {
+
+		var err error
+		if signCmds {
+			err = c.SendCommandSigned(cmd)
+		} else {
+			err = c.SendCommand(cmd)
+		}
+		if err != nil {
 			logx.Warnf("执行命令失败 /%s: %v", cmd, err)
 		}
 	}

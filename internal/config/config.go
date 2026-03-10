@@ -14,6 +14,7 @@ type ActionsConfig struct {
 	OnJoinCommands []string `yaml:"on_join_commands"`
 	OnJoinMessages []string `yaml:"on_join_messages"`
 	DelayMs        int      `yaml:"delay_ms"`
+	SignCommands   bool     `yaml:"sign_commands"`
 }
 
 type LogConfig struct {
@@ -44,6 +45,7 @@ func Default() Config {
 			OnJoinCommands: nil,
 			OnJoinMessages: nil,
 			DelayMs:        1200,
+			SignCommands:   false,
 		},
 		Log: LogConfig{
 			LogDir:     "logs",
