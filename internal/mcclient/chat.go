@@ -68,6 +68,26 @@ func (c *Client) SendCommand(command string) error {
 	return nil
 }
 
+func (c *Client) SendCommandSigned(command string) error {
+	cmd := strings.TrimSpace(command)
+	cmd = strings.TrimPrefix(cmd, "/")
+	if cmd == "" {
+		return fmt.Errorf("command 不能为空")
+	}
+	if c.state != statePlay {
+		return fmt.Errorf("当前状态不是 Play，无法发送命令")
+	}
+
+	if err := c.sendSignedCommand(cmd); err != nil {
+		logx.Debugf("签名命令失败，尝试无签名: %v", err)
+		if err2 := c.sendUnsignedCommand(cmd); err2 != nil {
+			return fmt.Errorf("发送命令失败: %w", err2)
+		}
+	}
+	logx.Debugf("已发送命令: /%s", cmd)
+	return nil
+}
+
 // SendMessage 发送未签名聊天消息。
 // 注：部分开启 secure chat 的服务器会拒绝未签名消息。
 func (c *Client) SendMessage(message string) error {
@@ -122,13 +142,21 @@ func (c *Client) runOnJoinActionsAsync() {
 	time.Sleep(time.Duration(delay) * time.Millisecond)
 
 	for _, cmd := range c.cfg.Actions.OnJoinCommands {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
+		cmd = strings.TrimPrefix(cmd, "/")
 		if err := c.SendCommand(cmd); err != nil {
-			logx.Warnf("执行 on_join_commands 失败: %v", err)
+			logx.Warnf("执行命令失败 /%s: %v", cmd, err)
 		}
 	}
 	for _, msg := range c.cfg.Actions.OnJoinMessages {
+		if strings.TrimSpace(msg) == "" {
+			continue
+		}
 		if err := c.SendMessage(msg); err != nil {
-			logx.Warnf("执行 on_join_messages 失败: %v", err)
+			logx.Warnf("发送消息失败: %v", err)
 		}
 	}
 }

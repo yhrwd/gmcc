@@ -15,34 +15,27 @@ type TextComponent struct {
 	Italic        any             `json:"italic,omitempty"`
 	Underlined    any             `json:"underlined,omitempty"`
 	Strikethrough any             `json:"strikethrough,omitempty"`
-	Obfuscated    any             `json:"obfuscated,omitempty"`
 	Translate     string          `json:"translate,omitempty"`
-	With          []any           `json:"with,omitempty"`
-	Selector      string          `json:"selector,omitempty"`
-	Keybind       string          `json:"keybind,omitempty"`
-	Insertion     string          `json:"insertion,omitempty"`
 }
 
-var ansiColors = map[string]string{
-	"black":        "\033[30m",
-	"dark_blue":    "\033[34m",
-	"dark_green":   "\033[32m",
-	"dark_aqua":    "\033[36m",
-	"dark_red":     "\033[31m",
-	"dark_purple":  "\033[35m",
-	"gold":         "\033[33m",
-	"gray":         "\033[37m",
-	"dark_gray":    "\033[90m",
-	"blue":         "\033[94m",
-	"green":        "\033[92m",
-	"aqua":         "\033[96m",
-	"red":          "\033[91m",
-	"light_purple": "\033[95m",
-	"yellow":       "\033[93m",
-	"white":        "\033[97m",
+var colorMap = map[string]int{
+	"black":        30,
+	"dark_blue":    34,
+	"dark_green":   32,
+	"dark_aqua":    36,
+	"dark_red":     31,
+	"dark_purple":  35,
+	"gold":         33,
+	"gray":         37,
+	"dark_gray":    90,
+	"blue":         94,
+	"green":        92,
+	"aqua":         96,
+	"red":          91,
+	"light_purple": 95,
+	"yellow":       93,
+	"white":        97,
 }
-
-const ansiReset = "\033[0m"
 
 func ParseTextComponent(rawJSON string) (*TextComponent, error) {
 	var comp TextComponent
@@ -52,60 +45,56 @@ func ParseTextComponent(rawJSON string) (*TextComponent, error) {
 	return &comp, nil
 }
 
-func toBool(v any) bool {
-	switch val := v.(type) {
-	case bool:
-		return val
-	case float64:
-		return val != 0
-	case string:
-		return val == "true" || val == "1"
-	default:
-		return false
-	}
-}
-
 func (c *TextComponent) ToANSI() string {
 	var sb strings.Builder
-	c.renderANSI(&sb, StyleState{})
+	c.render(&sb, nil)
+	sb.WriteString("\033[0m")
 	return sb.String()
 }
 
-type StyleState struct {
-	Color         string
-	Bold          bool
-	Italic        bool
-	Underlined    bool
-	Strikethrough bool
+type Style struct {
+	Color      *int
+	Bold       bool
+	Italic     bool
+	Underlined bool
 }
 
-func (c *TextComponent) renderANSI(sb *strings.Builder, parent StyleState) {
-	style := parent
-	changed := false
+func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
+	style := &Style{}
+	if parent != nil {
+		*style = *parent
+	}
+
+	hasChanges := false
 
 	if c.Color != "" {
-		style.Color = c.Color
-		changed = true
-	}
-	if toBool(c.Bold) {
-		style.Bold = true
-		changed = true
-	}
-	if toBool(c.Italic) {
-		style.Italic = true
-		changed = true
-	}
-	if toBool(c.Underlined) {
-		style.Underlined = true
-		changed = true
-	}
-	if toBool(c.Strikethrough) {
-		style.Strikethrough = true
-		changed = true
+		if code, ok := colorMap[c.Color]; ok {
+			style.Color = &code
+			hasChanges = true
+		} else if strings.HasPrefix(c.Color, "#") {
+			if r, g, b, ok := parseHex(c.Color); ok {
+				style.Color = nil
+				sb.WriteString(fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b))
+				hasChanges = true
+			}
+		}
 	}
 
-	if changed {
-		sb.WriteString(formatStyle(style))
+	if toBool(c.Bold) && !style.Bold {
+		style.Bold = true
+		hasChanges = true
+	}
+	if toBool(c.Italic) && !style.Italic {
+		style.Italic = true
+		hasChanges = true
+	}
+	if toBool(c.Underlined) && !style.Underlined {
+		style.Underlined = true
+		hasChanges = true
+	}
+
+	if hasChanges {
+		sb.WriteString(style.toANSI())
 	}
 
 	if c.Text != "" {
@@ -125,85 +114,77 @@ func (c *TextComponent) renderANSI(sb *strings.Builder, parent StyleState) {
 		}
 	}
 
-	if c.Selector != "" {
-		sb.WriteString(c.Selector)
-	}
-
-	if c.Keybind != "" {
-		sb.WriteString(c.Keybind)
-	}
-
 	for _, extra := range c.Extra {
-		extra.renderANSI(sb, style)
+		extra.render(sb, style)
 	}
 
-	if changed {
-		sb.WriteString(formatStyle(parent))
+	if hasChanges && parent != nil {
+		sb.WriteString(parent.toANSI())
 	}
 }
 
-func formatStyle(s StyleState) string {
-	var codes []string
+func (s *Style) toANSI() string {
+	var codes []int
 
 	if s.Bold {
-		codes = append(codes, "1")
+		codes = append(codes, 1)
 	}
 	if s.Italic {
-		codes = append(codes, "3")
+		codes = append(codes, 3)
 	}
 	if s.Underlined {
-		codes = append(codes, "4")
+		codes = append(codes, 4)
 	}
-	if s.Strikethrough {
-		codes = append(codes, "9")
-	}
-
-	var result strings.Builder
-
-	if len(codes) > 0 {
-		result.WriteString("\033[")
-		result.WriteString(strings.Join(codes, ";"))
-		result.WriteString("m")
+	if s.Color != nil {
+		codes = append(codes, *s.Color)
 	}
 
-	if s.Color != "" {
-		if ansi, ok := ansiColors[s.Color]; ok {
-			if len(codes) > 0 {
-				result.WriteString(ansi[2:])
-			} else {
-				result.WriteString(ansi)
-			}
-		} else if strings.HasPrefix(s.Color, "#") {
-			if fg, err := hexToANSI(s.Color); err == nil {
-				if len(codes) > 0 {
-					result.WriteString(fg[2:])
-				} else {
-					result.WriteString(fg)
-				}
-			}
+	if len(codes) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\033[")
+	for i, code := range codes {
+		if i > 0 {
+			sb.WriteString(";")
 		}
+		sb.WriteString(strconv.Itoa(code))
 	}
-
-	return result.String()
+	sb.WriteString("m")
+	return sb.String()
 }
 
-func hexToANSI(hex string) (string, error) {
+func toBool(v any) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case float64:
+		return val != 0
+	case string:
+		return val == "true" || val == "1"
+	default:
+		return false
+	}
+}
+
+func parseHex(hex string) (r, g, b int, ok bool) {
 	if len(hex) != 7 || hex[0] != '#' {
-		return "", fmt.Errorf("invalid hex color")
+		return 0, 0, 0, false
 	}
-	r, err := strconv.ParseInt(hex[1:3], 16, 32)
+	rr, err := strconv.ParseInt(hex[1:3], 16, 32)
 	if err != nil {
-		return "", err
+		return 0, 0, 0, false
 	}
-	g, err := strconv.ParseInt(hex[3:5], 16, 32)
+	gg, err := strconv.ParseInt(hex[3:5], 16, 32)
 	if err != nil {
-		return "", err
+		return 0, 0, 0, false
 	}
-	b, err := strconv.ParseInt(hex[5:7], 16, 32)
+	bb, err := strconv.ParseInt(hex[5:7], 16, 32)
 	if err != nil {
-		return "", err
+		return 0, 0, 0, false
 	}
-	return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b), nil
+	return int(rr), int(gg), int(bb), true
 }
 
 func (c *TextComponent) ToPlain() string {
@@ -214,21 +195,11 @@ func (c *TextComponent) ToPlain() string {
 
 func (c *TextComponent) renderPlain(sb *strings.Builder) {
 	sb.WriteString(c.Text)
-
 	if c.Translate != "" {
 		sb.WriteString("[")
 		sb.WriteString(c.Translate)
 		sb.WriteString("]")
 	}
-
-	if c.Selector != "" {
-		sb.WriteString(c.Selector)
-	}
-
-	if c.Keybind != "" {
-		sb.WriteString(c.Keybind)
-	}
-
 	for _, extra := range c.Extra {
 		extra.renderPlain(sb)
 	}
