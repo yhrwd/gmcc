@@ -41,7 +41,9 @@ func (t *Terminal) SetCommandHook(hook func(string)) {
 func (t *Terminal) Printf(format string, args ...any) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	fmt.Printf("\r\033[K")
 	fmt.Printf(format+"\n", args...)
+	fmt.Print("> ")
 }
 
 func (t *Terminal) PrintLine(line string) {

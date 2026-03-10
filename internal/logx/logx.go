@@ -11,7 +11,7 @@ import (
 
 var (
 	mu            sync.Mutex
-	consoleLogger = log.New(os.Stdout, "", log.Ltime)
+	consoleLogger = log.New(os.Stdout, "", 0)
 	fileLogger    *log.Logger
 	fileWriter    *rotatingFileWriter
 	packetLogger  *log.Logger
@@ -24,7 +24,6 @@ func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 	defer mu.Unlock()
 
 	debugEnabled = debug
-	consoleLogger.SetFlags(log.Ltime)
 	_ = closeLocked()
 
 	if enableFile {
@@ -52,22 +51,45 @@ func Close() error {
 }
 
 func Infof(format string, args ...interface{}) {
-	logfLocked("INFO", format, args...)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(args) == 0 {
+		consoleLogger.Printf("%s", format)
+	} else {
+		consoleLogger.Printf(format, args...)
+	}
+	if fileLogger != nil {
+		fileLogger.Printf("[INFO] "+format, args...)
+	}
 }
 
 func Warnf(format string, args ...interface{}) {
-	logfLocked("WARN", format, args...)
+	mu.Lock()
+	defer mu.Unlock()
+	consoleLogger.Printf("\033[33m[WARN] "+format+"\033[0m", args...)
+	if fileLogger != nil {
+		fileLogger.Printf("[WARN] "+format, args...)
+	}
 }
 
 func Errorf(format string, args ...interface{}) {
-	logfLocked("ERROR", format, args...)
+	mu.Lock()
+	defer mu.Unlock()
+	consoleLogger.Printf("\033[31m[ERROR] "+format+"\033[0m", args...)
+	if fileLogger != nil {
+		fileLogger.Printf("[ERROR] "+format, args...)
+	}
 }
 
 func Debugf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
 	if debugEnabled {
-		writeLocked("DEBUG", format, args...)
+		now := time.Now().Format("15:04:05")
+		consoleLogger.Printf("%s [DEBUG] %s", now, fmt.Sprintf(format, args...))
+		if fileLogger != nil {
+			fileLogger.Printf("[DEBUG] "+format, args...)
+		}
 	}
 }
 
@@ -76,20 +98,6 @@ func PacketLogf(format string, args ...interface{}) {
 	defer mu.Unlock()
 	if packetLogger != nil {
 		packetLogger.Printf("[PACKET] "+format, args...)
-	}
-}
-
-func logfLocked(level, format string, args ...interface{}) {
-	mu.Lock()
-	defer mu.Unlock()
-	writeLocked(level, format, args...)
-}
-
-func writeLocked(level, format string, args ...interface{}) {
-	lineFormat := "[" + level + "] " + format
-	consoleLogger.Printf(lineFormat, args...)
-	if fileLogger != nil {
-		fileLogger.Printf(lineFormat, args...)
 	}
 }
 

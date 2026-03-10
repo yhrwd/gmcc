@@ -329,14 +329,8 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 }
 
 func (c *Client) emitChat(chat ChatMessage) {
-	if strings.TrimSpace(chat.PlainText) == "" && strings.TrimSpace(chat.RawJSON) != "" {
-		logx.Infof("收到聊天消息: type=%s sender=%s plain=<empty> raw=%s", chat.Type, chat.SenderUUID, shortString(chat.RawJSON, 180))
-	} else {
-		logx.Infof("收到聊天消息: type=%s sender=%s plain=%q", chat.Type, chat.SenderUUID, chat.PlainText)
-	}
-
 	if strings.TrimSpace(chat.RawJSON) != "" {
-		logx.Debugf("聊天 JSON: %s", chat.RawJSON)
+		logx.Debugf("聊天: %s", chat.RawJSON)
 	}
 
 	if c.chatHandler != nil {

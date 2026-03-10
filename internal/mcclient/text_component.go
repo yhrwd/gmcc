@@ -100,9 +100,16 @@ func (c *TextComponent) renderANSI(sb *strings.Builder, parent StyleState) {
 	}
 
 	if c.Translate != "" {
-		sb.WriteString("[")
-		sb.WriteString(c.Translate)
-		sb.WriteString("]")
+		switch c.Translate {
+		case "command.unknown.argument":
+			sb.WriteString("未知命令参数")
+		case "command.context.here":
+			sb.WriteString(" <--[此处]")
+		default:
+			sb.WriteString("[")
+			sb.WriteString(c.Translate)
+			sb.WriteString("]")
+		}
 	}
 
 	if c.Selector != "" {
