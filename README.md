@@ -1,101 +1,137 @@
 # gmcc
 
-Go: Console Minecraft Client
+Go 语言实现的 Minecraft Java 版控制台客户端，支持协议版本 774 (1.21.11)。
 
-## Structure
+## 功能特性
 
-```text
-cmd/gmcc
-  main.go                 # CLI entry
+- ✅ 微软正版认证（设备码登录 / 刷新令牌）
+- ✅ 离线模式支持
+- ✅ 登录加密（AES/CFB8）
+- ✅ 登录压缩
+- ✅ 配置状态处理
+- ✅ 游戏状态心跳（保持在线）
+- ✅ 聊天消息接收/发送
+- ✅ 命令发送
+- ✅ CESU-8 编码支持（正确显示中文和 Emoji）
+- ✅ NBT 数据解析与路径查询
 
-internal/auth/microsoft
-  service.go              # Microsoft/Xbox/XSTS token workflow
+## 快速开始
 
-internal/auth/minecraft
-  service.go              # Minecraft login and ownership check
+### 下载
 
-internal/config
-  config.go               # Config model + defaults
-  loader.go               # YAML loading/validation
+从 [Releases](https://github.com/yhrwd/gmcc/releases) 页面下载对应平台的二进制文件。
 
-internal/mcclient
-  protocol_774.go         # Packet IDs for 1.21.11 (protocol 774)
-  codec.go                # Packet framing/compression/encryption codec
-  client.go               # Login/Configuration/Play state machine + AFK
-
-pkg/httpx
-  client.go               # Reusable HTTP helper
-
-pkg/rwfile
-  string.go               # String/bytes file helpers
-  gob.go                  # Gob encode/decode helpers
-
-pkg/cryptox
-  crypto.go               # AES/RSA helpers
-```
-
-## Packages
-
-- `internal/config`: 读取/校验 `config.yaml`。
-- `internal/auth/microsoft`: Microsoft/Xbox/XSTS 登录链路。
-- `internal/auth/minecraft`: Minecraft token、ownership、session join。
-- `internal/session`: 本地 token 缓存（`.session/<player>.json`）。
-- `internal/mcclient`: 协议 774 的连接、编解码、状态机、聊天收发。
-- `internal/logx`: 控制台/文件日志。
-- `pkg/httpx`: HTTP 请求封装。
-- `pkg/rwfile`: 文件读写工具。
-- `pkg/cryptox`: 通用加解密工具。
-
-## Run
+### 运行
 
 ```bash
-go run ./cmd/gmcc
+# 首次运行会生成默认配置文件
+./gmcc
+
+# 或指定配置文件路径
+GMCC_CONFIG=/path/to/config.yaml ./gmcc
 ```
 
-## Log
+### 配置
 
-- 控制台与文件双写日志（可通过 `log.enable_file` 控制）。
-- 控制台仅输出时间（`HH:MM:SS`），不显示日期。
-- 默认日志文件为 `logs/gmcc.log`，达到 `log.max_size` 后按大小分块滚动为 `logs/gmcc-*.log`。
-- `log.debug=true` 时会输出协议级调试信息（包 ID、状态、frame 长度、加密阶段细节）。
-
-## Development
-
-- 开发说明与扩展清单：`docs/development.md`
-
-## Config
+编辑 `config.yaml`：
 
 ```yaml
 account:
-  player_id: "YourName"
-  use_official_auth: true
+  player_id: "你的游戏ID"
+  use_official_auth: true   # true: 正版认证, false: 离线模式
+
+server:
+  address: "mc.example.com:25565"
+
 actions:
-  delay_ms: 1200
-  on_join_commands: ["list"]
-  on_join_messages: []
+  delay_ms: 1200            # 入服后动作延迟（毫秒）
+  on_join_commands:         # 入服后自动执行的命令
+    - "list"
+  on_join_messages:         # 入服后自动发送的消息
+    - "大家好"
+
+log:
+  log_dir: "logs"           # 日志目录
+  max_size: 10              # 单个日志文件最大大小（MB）
+  debug: false              # 调试模式
+  enable_file: true         # 启用文件日志
 ```
 
-- `use_official_auth=false`: 仅使用离线模式。
-- `use_official_auth=true`: 启用 Microsoft 正版认证流程。
-- `actions.on_join_commands`: 进入 Play 后自动发送命令（不带 `/`）。
-- `actions.on_join_messages`: 进入 Play 后自动发送聊天消息。
-- `actions.delay_ms`: 入服后动作延迟，默认 1200ms（让 secure chat 会话先同步）。
+## 认证流程
 
-## Implemented Flow (1.21.11 / 774)
+### 正版认证（`use_official_auth: true`）
 
-- Handshake -> Login -> Configuration -> Play
-- Login compression + AES/CFB8 encryption
-- Online auth workflow (`use_official_auth=true`):
-  - Reuse cached Minecraft token from `.session/<player>.json`
-  - Fallback to Microsoft `refresh_token` refresh
-  - Fallback to device-code login if refresh is unavailable/invalid
-  - Complete `sessionserver join` during encrypted login
-- Runtime responses for AFK:
-  - keep_alive / ping / teleport confirm
-  - cookie request / resource-pack status
-  - periodic `move_player_status_only` heartbeat
-- Chat and command support:
-  - receive `system_chat` / `player_chat` / `action_bar`
-  - extract raw chat JSON for plugin-formatted message parsing
-  - auto send `chat_session_update` (profile public key) after entering play
-  - send command via `chat_command_signed` (signed-lite fallback to `chat_command`), send message via `chat_message`
+1. 首次运行时，程序会输出设备码登录链接
+2. 在浏览器中打开链接，输入设备码完成微软登录
+3. 认证成功后，令牌会缓存到 `.session/<玩家ID>.json`
+4. 后续运行会自动刷新令牌，无需重复登录
+
+### 离线模式（`use_official_auth: false`）
+
+直接使用 `player_id` 作为游戏用户名连接服务器。
+
+## 命令行用法
+
+```bash
+# 显示帮助
+./gmcc -h
+
+# 显示版本
+./gmcc -version
+```
+
+## 项目结构
+
+```
+cmd/gmcc/
+  main.go                    # 程序入口
+
+internal/
+  auth/
+    microsoft/service.go     # 微软/Xbox/XSTS 认证
+    minecraft/service.go     # Minecraft 登录验证
+  config/
+    config.go                # 配置结构定义
+    loader.go                # YAML 加载校验
+  logx/
+    logx.go                  # 日志模块
+  mcclient/
+    client.go                # 客户端状态机
+    codec.go                 # 协议编解码
+    chat.go                  # 聊天/命令处理
+    chat_parser.go           # 聊天 JSON 解析
+    protocol_774.go          # 协议常量定义
+  nbt/
+    decode.go                # NBT 解码器
+    encode.go                # NBT 编码器
+    snbt.go                  # SNBT 解析器
+    path.go                  # NBT 路径查询
+    cesu8.go                 # CESU-8 转换
+  session/
+    cache.go                 # 会话令牌缓存
+
+pkg/
+  httpx/                     # HTTP 工具
+  rwfile/                    # 文件读写工具
+  cryptox/                   # 加解密工具
+```
+
+## 编译
+
+```bash
+# 本地编译
+go build -o gmcc ./cmd/gmcc
+
+# 交叉编译
+GOOS=windows GOARCH=amd64 go build -o gmcc.exe ./cmd/gmcc
+GOOS=linux GOARCH=amd64 go build -o gmcc ./cmd/gmcc
+GOOS=darwin GOARCH=arm64 go build -o gmcc ./cmd/gmcc
+```
+
+## 开发文档
+
+详细开发说明请参阅 [docs/development.md](docs/development.md)。
+
+## 许可证
+
+MIT License
