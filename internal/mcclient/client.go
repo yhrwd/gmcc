@@ -75,6 +75,10 @@ func New(cfg *config.Config) *Client {
 	return client
 }
 
+func (c *Client) IsReady() bool {
+	return c.inPlay
+}
+
 func (c *Client) Run(ctx context.Context) error {
 	if strings.TrimSpace(c.offlineName) == "" {
 		return fmt.Errorf("account.player_id 不能为空")
