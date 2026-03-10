@@ -564,7 +564,6 @@ func (c *Client) handleDeclareCommandsPacket(data []byte) error {
 			}
 			node.Name = name
 			node.ParserID = parserID
-			logx.Debugf("命令参数节点[%d]: name=%s parserID=%d type=%d", i, name, parserID, nodeType)
 		}
 
 		nodes[i] = node
