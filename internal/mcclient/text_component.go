@@ -105,8 +105,8 @@ func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
 		}
 	}
 
-	for _, extra := range c.Extra {
-		extra.render(sb, style)
+	for i := range c.Extra {
+		c.Extra[i].render(sb, style)
 	}
 
 	if parent != nil {
