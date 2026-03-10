@@ -344,11 +344,7 @@ func (c *Client) emitChat(chat ChatMessage) {
 	if strings.TrimSpace(chat.RawJSON) != "" {
 		logx.Debugf("聊天 JSON: %s", chat.RawJSON)
 	}
-	// 检测未知字符（替换字符 �）
-	if strings.Contains(chat.PlainText, "�") {
-		logx.Warnf("检测到未知字符，原始JSON: %s", chat.RawJSON)
-		logx.Debugf("PlainText with unknown chars: %q", chat.PlainText)
-	}
+
 	if c.chatHandler != nil {
 		c.chatHandler(chat)
 	}
