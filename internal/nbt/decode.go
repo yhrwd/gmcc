@@ -682,6 +682,12 @@ func indirect(v reflect.Value, decodingNull bool) (Unmarshaler, encoding.TextUnm
 }
 
 func cesu8ToUTF8(data []byte) string {
+	return CESU8ToUTF8(data)
+}
+
+// CESU8ToUTF8 将 CESU-8（Modified UTF-8）转换为标准 UTF-8。
+// Minecraft Java 使用 CESU-8 编码字符串。
+func CESU8ToUTF8(data []byte) string {
 	if len(data) == 0 {
 		return ""
 	}

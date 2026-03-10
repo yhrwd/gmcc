@@ -18,6 +18,7 @@ import (
 
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/logx"
+	"gmcc/internal/nbt"
 )
 
 // ChatMessage 是统一的聊天事件结构，方便后续接入机器人/插件解析。
@@ -726,13 +727,14 @@ func discardN(r io.Reader, n int64) error {
 }
 
 func readAnonymousNBTJSON(r io.Reader) (string, error) {
-	dec := newNBTDecoder(r, true)
-	v, err := dec.decodeRoot()
-	if err != nil {
+	dec := nbt.NewDecoder(r)
+	dec.NetworkFormat(true)
+	var v any
+	if err := dec.Decode(&v); err != nil {
 		return "", err
 	}
 
-	raw, err := json.Marshal(fixCESU8InValue(v))
+	raw, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}

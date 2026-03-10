@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gmcc/internal/logx"
+	"gmcc/internal/nbt"
 )
 
 type packet struct {
@@ -250,7 +251,7 @@ func readString(r io.ByteReader, rr io.Reader) (string, error) {
 	if _, err := io.ReadFull(rr, buf); err != nil {
 		return "", err
 	}
-	return cesu8ToUTF8(buf), nil
+	return nbt.CESU8ToUTF8(buf), nil
 }
 
 func encodeString(s string) []byte {

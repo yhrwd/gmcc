@@ -11,12 +11,15 @@ import (
 	"gmcc/internal/mcclient"
 )
 
+var Version = "dev"
+
 func main() {
 	configPath := "config.yaml"
 	if v := os.Getenv("GMCC_CONFIG"); v != "" {
 		configPath = v
 	}
 
+	logx.Infof("gmcc version: %s", Version)
 	logx.Infof("正在加载配置文件: %s", configPath)
 
 	// 加载配置
