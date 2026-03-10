@@ -11,11 +11,11 @@ type TextComponent struct {
 	Text          string          `json:"text,omitempty"`
 	Extra         []TextComponent `json:"extra,omitempty"`
 	Color         string          `json:"color,omitempty"`
-	Bold          bool            `json:"bold,omitempty"`
-	Italic        bool            `json:"italic,omitempty"`
-	Underlined    bool            `json:"underlined,omitempty"`
-	Strikethrough bool            `json:"strikethrough,omitempty"`
-	Obfuscated    bool            `json:"obfuscated,omitempty"`
+	Bold          any             `json:"bold,omitempty"`
+	Italic        any             `json:"italic,omitempty"`
+	Underlined    any             `json:"underlined,omitempty"`
+	Strikethrough any             `json:"strikethrough,omitempty"`
+	Obfuscated    any             `json:"obfuscated,omitempty"`
 	Translate     string          `json:"translate,omitempty"`
 	With          []any           `json:"with,omitempty"`
 	Selector      string          `json:"selector,omitempty"`
@@ -52,6 +52,19 @@ func ParseTextComponent(rawJSON string) (*TextComponent, error) {
 	return &comp, nil
 }
 
+func toBool(v any) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case float64:
+		return val != 0
+	case string:
+		return val == "true" || val == "1"
+	default:
+		return false
+	}
+}
+
 func (c *TextComponent) ToANSI() string {
 	var sb strings.Builder
 	c.renderANSI(&sb, StyleState{})
@@ -74,19 +87,19 @@ func (c *TextComponent) renderANSI(sb *strings.Builder, parent StyleState) {
 		style.Color = c.Color
 		changed = true
 	}
-	if c.Bold {
+	if toBool(c.Bold) {
 		style.Bold = true
 		changed = true
 	}
-	if c.Italic {
+	if toBool(c.Italic) {
 		style.Italic = true
 		changed = true
 	}
-	if c.Underlined {
+	if toBool(c.Underlined) {
 		style.Underlined = true
 		changed = true
 	}
-	if c.Strikethrough {
+	if toBool(c.Strikethrough) {
 		style.Strikethrough = true
 		changed = true
 	}
@@ -155,10 +168,18 @@ func formatStyle(s StyleState) string {
 
 	if s.Color != "" {
 		if ansi, ok := ansiColors[s.Color]; ok {
-			result.WriteString(ansi)
+			if len(codes) > 0 {
+				result.WriteString(ansi[2:])
+			} else {
+				result.WriteString(ansi)
+			}
 		} else if strings.HasPrefix(s.Color, "#") {
 			if fg, err := hexToANSI(s.Color); err == nil {
-				result.WriteString(fg)
+				if len(codes) > 0 {
+					result.WriteString(fg[2:])
+				} else {
+					result.WriteString(fg)
+				}
 			}
 		}
 	}
