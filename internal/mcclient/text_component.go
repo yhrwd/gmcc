@@ -2,7 +2,6 @@ package mcclient
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -49,7 +48,8 @@ func (c *TextComponent) ToANSI() string {
 	var sb strings.Builder
 	c.render(&sb, nil)
 	sb.WriteString("\033[0m")
-	return sb.String()
+	result := sb.String()
+	return result
 }
 
 type Style struct {
@@ -65,37 +65,28 @@ func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
 		*style = *parent
 	}
 
-	hasChanges := false
-
 	if c.Color != "" {
 		if code, ok := colorMap[c.Color]; ok {
 			style.Color = &code
-			hasChanges = true
 		} else if strings.HasPrefix(c.Color, "#") {
 			if r, g, b, ok := parseHex(c.Color); ok {
-				style.Color = nil
-				sb.WriteString(fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b))
-				hasChanges = true
+				c256 := nearestColor(r, g, b)
+				style.Color = &c256
 			}
 		}
 	}
 
-	if toBool(c.Bold) && !style.Bold {
+	if toBool(c.Bold) {
 		style.Bold = true
-		hasChanges = true
 	}
-	if toBool(c.Italic) && !style.Italic {
+	if toBool(c.Italic) {
 		style.Italic = true
-		hasChanges = true
 	}
-	if toBool(c.Underlined) && !style.Underlined {
+	if toBool(c.Underlined) {
 		style.Underlined = true
-		hasChanges = true
 	}
 
-	if hasChanges {
-		sb.WriteString(style.toANSI())
-	}
+	sb.WriteString(style.toANSI())
 
 	if c.Text != "" {
 		sb.WriteString(c.Text)
@@ -118,9 +109,42 @@ func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
 		extra.render(sb, style)
 	}
 
-	if hasChanges && parent != nil {
+	if parent != nil {
 		sb.WriteString(parent.toANSI())
 	}
+}
+
+func nearestColor(r, g, b int) int {
+	colors := []struct{ r, g, b, code int }{
+		{0, 0, 0, 30},
+		{0, 0, 170, 34},
+		{0, 170, 0, 32},
+		{0, 170, 170, 36},
+		{170, 0, 0, 31},
+		{170, 0, 170, 35},
+		{255, 170, 0, 33},
+		{170, 170, 170, 37},
+		{85, 85, 85, 90},
+		{85, 85, 255, 94},
+		{85, 255, 85, 92},
+		{85, 255, 255, 96},
+		{255, 85, 85, 91},
+		{255, 85, 255, 95},
+		{255, 255, 85, 93},
+		{255, 255, 255, 97},
+	}
+
+	minDist := 1<<31 - 1
+	bestCode := 37
+	for _, c := range colors {
+		dr, dg, db := r-c.r, g-c.g, b-c.b
+		dist := dr*dr + dg*dg + db*db
+		if dist < minDist {
+			minDist = dist
+			bestCode = c.code
+		}
+	}
+	return bestCode
 }
 
 func (s *Style) toANSI() string {
