@@ -49,3 +49,4 @@ go.work
 logs/
 config.yaml
 id.txt
+.knowledge/
