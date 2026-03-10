@@ -61,17 +61,10 @@ func (c *Client) SendCommand(command string) error {
 		return fmt.Errorf("当前状态不是 Play，无法发送命令")
 	}
 
-	// 1.21.11 使用 chat_command_signed。
-	// 当前实现会对 /say 的 message 参数做真实 RSA 签名，其余命令暂走基础签名字段。
-	if err := c.sendSignedCommand(cmd); err != nil {
-		logx.Warnf("发送签名命令失败，回退无签名命令: %v", err)
-		if err2 := c.sendUnsignedCommand(cmd); err2 != nil {
-			return fmt.Errorf("发送命令失败: signedErr=%v, unsignedErr=%w", err, err2)
-		}
-		logx.Infof("已发送命令(unsigned fallback): /%s", cmd)
-		return nil
+	if err := c.sendUnsignedCommand(cmd); err != nil {
+		return fmt.Errorf("发送命令失败: %w", err)
 	}
-	logx.Infof("已发送命令(signed): /%s", cmd)
+	logx.Debugf("已发送命令: /%s", cmd)
 	return nil
 }
 
