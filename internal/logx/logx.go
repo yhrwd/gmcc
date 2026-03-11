@@ -11,7 +11,7 @@ import (
 
 var (
 	mu            sync.Mutex
-	consoleLogger = log.New(os.Stdout, "", 0)
+	consoleLogger *log.Logger
 	fileLogger    *log.Logger
 	fileWriter    *rotatingFileWriter
 	packetLogger  *log.Logger
@@ -25,6 +25,9 @@ func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 
 	debugEnabled = debug
 	_ = closeLocked()
+
+	consoleLogger = log.New(os.Stdout, "", 0)
+	consoleLogger.SetOutput(os.Stdout)
 
 	if enableFile {
 		w, err := newRotatingFileWriter(logDir, maxSize)
@@ -66,7 +69,7 @@ func Infof(format string, args ...interface{}) {
 func Warnf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
-	consoleLogger.Printf("\033[33m[WARN] "+format+"\033[0m", args...)
+	consoleLogger.Printf("[WARN] "+format, args...)
 	if fileLogger != nil {
 		fileLogger.Printf("[WARN] "+format, args...)
 	}
@@ -75,7 +78,7 @@ func Warnf(format string, args ...interface{}) {
 func Errorf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
-	consoleLogger.Printf("\033[31m[ERROR] "+format+"\033[0m", args...)
+	consoleLogger.Printf("[ERROR] "+format, args...)
 	if fileLogger != nil {
 		fileLogger.Printf("[ERROR] "+format, args...)
 	}
