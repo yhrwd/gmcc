@@ -52,19 +52,28 @@ const (
 
 // Play state packet IDs (protocol 774)
 const (
-	playClientDeclareCommands int32 = 0x10
-	playClientCookieReq       int32 = 0x15
-	playClientDisconnect      int32 = 0x20
-	playClientProfilelessChat int32 = 0x21
-	playClientKeepAlive       int32 = 0x2B
-	playClientLogin           int32 = 0x30
-	playClientPlayerChat      int32 = 0x3F
-	playClientPing            int32 = 0x3B
-	playClientPosition        int32 = 0x46
-	playClientPackPop         int32 = 0x4E
-	playClientPackPush        int32 = 0x4F
-	playClientActionBar       int32 = 0x55
-	playClientSystemChat      int32 = 0x77
+	playClientDeclareCommands  int32 = 0x10
+	playClientCookieReq        int32 = 0x15
+	playClientDisconnect       int32 = 0x20
+	playClientProfilelessChat  int32 = 0x21
+	playClientKeepAlive        int32 = 0x2B
+	playClientLogin            int32 = 0x30
+	playClientPlayerChat       int32 = 0x3F
+	playClientPing             int32 = 0x3B
+	playClientPosition         int32 = 0x46
+	playClientPackPop          int32 = 0x4E
+	playClientPackPush         int32 = 0x4F
+	playClientActionBar        int32 = 0x55
+	playClientSystemChat       int32 = 0x77
+	playClientSetHealth        int32 = 0x54
+	playClientSetExperience    int32 = 0x4D
+	playClientPlayerInfoUpdate int32 = 0x42
+	playClientPlayerInfoRemove int32 = 0x3D
+	playClientSetHeldSlot      int32 = 0x65
+	playClientContainerContent int32 = 0x11
+	playClientContainerSlot    int32 = 0x14
+	playClientEntityData       int32 = 0x5D
+	playClientGameEvent        int32 = 0x22
 
 	playServerMsgAck          int32 = 0x05
 	playServerChatCommand     int32 = 0x06
@@ -133,19 +142,28 @@ var cfgClientPacketNames = map[int32]string{
 }
 
 var playClientPacketNames = map[int32]string{
-	playClientDeclareCommands: "declare_commands",
-	playClientCookieReq:       "cookie_request",
-	playClientDisconnect:      "disconnect",
-	playClientProfilelessChat: "profileless_chat",
-	playClientKeepAlive:       "keep_alive",
-	playClientLogin:           "login",
-	playClientPlayerChat:      "player_chat",
-	playClientPing:            "ping",
-	playClientPosition:        "player_position",
-	playClientPackPop:         "resource_pack_pop",
-	playClientPackPush:        "resource_pack_push",
-	playClientActionBar:       "action_bar",
-	playClientSystemChat:      "system_chat",
+	playClientDeclareCommands:  "declare_commands",
+	playClientCookieReq:        "cookie_request",
+	playClientDisconnect:       "disconnect",
+	playClientProfilelessChat:  "profileless_chat",
+	playClientKeepAlive:        "keep_alive",
+	playClientLogin:            "login",
+	playClientPlayerChat:       "player_chat",
+	playClientPing:             "ping",
+	playClientPosition:         "player_position",
+	playClientPackPop:          "resource_pack_pop",
+	playClientPackPush:         "resource_pack_push",
+	playClientActionBar:        "action_bar",
+	playClientSystemChat:       "system_chat",
+	playClientSetHealth:        "set_health",
+	playClientSetExperience:    "set_experience",
+	playClientPlayerInfoUpdate: "player_info_update",
+	playClientPlayerInfoRemove: "player_info_remove",
+	playClientSetHeldSlot:      "set_held_slot",
+	playClientContainerContent: "container_set_content",
+	playClientContainerSlot:    "container_set_slot",
+	playClientEntityData:       "entity_data",
+	playClientGameEvent:        "game_event",
 }
 
 func stateName(state connState) string {

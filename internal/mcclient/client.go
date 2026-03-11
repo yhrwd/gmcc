@@ -24,6 +24,7 @@ import (
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
+	"gmcc/internal/player"
 	"gmcc/internal/session"
 )
 
@@ -59,6 +60,8 @@ type Client struct {
 	chatSession   *secureChatSession
 	commandSign   map[string]signableCommandTarget
 	chatSignMu    sync.Mutex
+
+	Player *player.Player
 }
 
 func New(cfg *config.Config) *Client {
@@ -70,6 +73,7 @@ func New(cfg *config.Config) *Client {
 		username:    name,
 		uuid:        offlineUUID(name),
 		commandSign: map[string]signableCommandTarget{},
+		Player:      player.NewPlayer(),
 	}
 
 	return client
@@ -542,6 +546,24 @@ func (c *Client) handlePlayPacket(pkt packet) error {
 
 	case playClientPackPop:
 		return nil
+
+	case playClientSetHealth:
+		return c.handleSetHealthPacket(pkt.Data)
+
+	case playClientSetExperience:
+		return c.handleSetExperiencePacket(pkt.Data)
+
+	case playClientSetHeldSlot:
+		return c.handleSetHeldSlotPacket(pkt.Data)
+
+	case playClientContainerContent:
+		return c.handleContainerContentPacket(pkt.Data)
+
+	case playClientContainerSlot:
+		return c.handleContainerSlotPacket(pkt.Data)
+
+	case playClientGameEvent:
+		return c.handleGameEventPacket(pkt.Data)
 
 	default:
 		logx.PacketLogf("未处理的 Play 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(statePlay, pkt.ID), len(pkt.Data))
