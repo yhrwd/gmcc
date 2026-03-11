@@ -61,6 +61,8 @@ func (c *Client) SendCommand(command string) error {
 		return fmt.Errorf("当前状态不是 Play，无法发送命令")
 	}
 
+	logx.Debugf("发送命令原始内容: %q", cmd)
+
 	if err := c.sendUnsignedCommand(cmd); err != nil {
 		return fmt.Errorf("发送命令失败: %w", err)
 	}
@@ -394,7 +396,9 @@ func randomUUIDv4() ([16]byte, error) {
 }
 
 func (c *Client) sendUnsignedCommand(cmd string) error {
-	return c.conn.WritePacket(playServerChatCommand, encodeString(cmd))
+	payload := encodeString(cmd)
+	logx.Debugf("命令包内容 (hex): %x", payload)
+	return c.conn.WritePacket(playServerChatCommand, payload)
 }
 
 func (c *Client) sendSignedCommand(cmd string) error {
