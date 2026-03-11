@@ -2,18 +2,108 @@
 
 ## 目标
 
-本项目针对 **Java 版协议 774** (1.21.11)，保持运行时精简：
+本项目针对 **Java 版协议 774** (1.21.11)，提供完整的 Minecraft 客户端功能：
 
 - 连接服务器
-- 登录/认证
+- 登录/认证（离线/正版）
 - 进入游戏状态
 - 保持在线心跳
+- 聊天消息收发
+- 命令执行
+- 玩家状态/位置/背包信息获取
+- TUI 终端界面
 
-设计参考 `node-minecraft-protocol` 的思路：
+设计理念：
 
-- 将客户端管道拆分为 auth / encrypt / compress / play 阶段
-- 协议行为按功能开关控制，而非硬编码所有版本
+- 模块化：协议、认证、界面分离
+- 可扩展：通过包处理器添加新功能
+- 协议行为按功能开关控制，而非硬编码版本
 - 日志包含协议细节，便于问题定位
+
+## 工具结构
+
+```
+gmcc/
+├── cmd/gmcc/                 # 程序入口
+│   └── main.go               # 启动、信号处理、协调各模块
+│
+├── internal/                 # 内部模块（不对外暴露）
+│   ├── auth/                 # 认证模块
+│   │   ├── microsoft/        # 微软/Xbox/XSTS 认证
+│   │   │   └── service.go    # 设备码登录、令牌刷新
+│   │   └── minecraft/        # Minecraft 认证
+│   │       └── service.go    # MC 令牌获取、会话加入、证书
+│   │
+│   ├── config/               # 配置管理
+│   │   ├── config.go         # 配置结构定义
+│   │   └── loader.go         # YAML 加载、验证
+│   │
+│   ├── logx/                 # 日志系统
+│   │   └── logx.go           # 文件日志、控制台输出
+│   │
+│   ├── mcclient/             # Minecraft 客户端核心
+│   │   ├── client.go         # 状态机、主循环、连接管理
+│   │   ├── codec.go          # 包读写、VarInt、加密、压缩
+│   │   ├── protocol_774.go   # 协议常量、包 ID 映射
+│   │   ├── chat.go           # 聊天消息、命令发送
+│   │   ├── chat_parser.go    # 聊天 JSON 解析
+│   │   ├── text_component.go # 文本组件、ANSI 转换
+│   │   └── player.go         # 玩家数据管理（新增）
+│   │
+│   ├── nbt/                  # NBT 数据处理
+│   │   ├── nbt.go            # 类型定义
+│   │   ├── decode.go         # 解码器
+│   │   ├── encode.go         # 编码器
+│   │   ├── snbt.go           # SNBT 解析
+│   │   ├── path.go           # 路径查询
+│   │   └── raw.go            # 原始 NBT
+│   │
+│   ├── player/               # 玩家信息管理（新增）
+│   │   ├── player.go         # 玩家状态、位置、背包
+│   │   ├── inventory.go      # 背包管理
+│   │   └── item.go           # 物品数据结构
+│   │
+│   ├── session/              # 会话缓存
+│   │   └── cache.go          # 令牌持久化
+│   │
+│   └── tui/                  # TUI 框架（新增）
+│       ├── screen.go         # 屏幕、光标、双缓冲
+│       ├── event.go          # 事件循环、输入处理
+│       ├── renderer.go       # 渲染器
+│       ├── component.go      # 组件接口
+│       ├── layout.go         # 布局管理
+│       ├── theme.go          # 主题配置
+│       └── widgets/          # 内置组件
+│           ├── box.go        # 容器
+│           ├── text.go       # 文本
+│           ├── input.go      # 输入框
+│           ├── list.go       # 列表
+│           └── table.go      # 表格
+│
+├── pkg/                      # 公共工具包
+│   ├── httpx/                # HTTP 客户端
+│   │   └── client.go         # 请求封装、重试
+│   ├── rwfile/               # 文件读写
+│   │   ├── string.go         # 字符串文件
+│   │   └── gob.go            # GOB 序列化
+│   └── cryptox/              # 加解密
+│       └── crypto.go         # RSA、AES 工具
+│
+├── docs/                     # 文档
+│   ├── README.md             # 文档索引
+│   ├── development.md        # 开发指南（本文件）
+│   ├── protocol.md           # 协议实现
+│   ├── auth.md               # 认证系统
+│   ├── tui.md                # TUI 框架
+│   └── player.md             # 玩家数据
+│
+└── .knowledge/               # 协议知识库
+    ├── README.md             # 索引
+    ├── MC_Protocol_Data/     # 协议数据
+    ├── minecraft-data/       # 游戏数据
+    ├── prismarine-chat/      # 聊天解析参考
+    └── prismarine-nbt/       # NBT 解析参考
+```
 
 ## 包说明
 
