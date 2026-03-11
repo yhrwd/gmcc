@@ -2,6 +2,7 @@ package mcclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -35,23 +36,23 @@ type HoverEvent struct {
 	ValueString string         `json:"value"`
 }
 
-var colorMap = map[string]int{
-	"black":        30,
-	"dark_blue":    34,
-	"dark_green":   32,
-	"dark_aqua":    36,
-	"dark_red":     31,
-	"dark_purple":  35,
-	"gold":         33,
-	"gray":         37,
-	"dark_gray":    90,
-	"blue":         94,
-	"green":        92,
-	"aqua":         96,
-	"red":          91,
-	"light_purple": 95,
-	"yellow":       93,
-	"white":        97,
+var basicColorMap = map[string]ColorRGB{
+	"black":        {0, 0, 0},
+	"dark_blue":    {0, 0, 170},
+	"dark_green":   {0, 170, 0},
+	"dark_aqua":    {0, 170, 170},
+	"dark_red":     {170, 0, 0},
+	"dark_purple":  {170, 0, 170},
+	"gold":         {255, 170, 0},
+	"gray":         {170, 170, 170},
+	"dark_gray":    {85, 85, 85},
+	"blue":         {85, 85, 255},
+	"green":        {85, 255, 85},
+	"aqua":         {85, 255, 255},
+	"red":          {255, 85, 85},
+	"light_purple": {255, 85, 255},
+	"yellow":       {255, 255, 85},
+	"white":        {255, 255, 255},
 }
 
 var colorToMotd = map[string]string{
@@ -96,12 +97,16 @@ func (c *TextComponent) ToANSI() string {
 }
 
 type Style struct {
-	Color         *int
+	Color         *ColorRGB
 	Bold          bool
 	Italic        bool
 	Underlined    bool
 	Strikethrough bool
 	Obfuscated    bool
+}
+
+type ColorRGB struct {
+	R, G, B int
 }
 
 func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
@@ -111,12 +116,11 @@ func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
 	}
 
 	if c.Color != "" {
-		if code, ok := colorMap[c.Color]; ok {
-			style.Color = &code
+		if code, ok := basicColorMap[c.Color]; ok {
+			style.Color = &ColorRGB{R: code.R, G: code.G, B: code.B}
 		} else if strings.HasPrefix(c.Color, "#") {
 			if r, g, b, ok := parseHex(c.Color); ok {
-				c256 := nearestColor(r, g, b)
-				style.Color = &c256
+				style.Color = &ColorRGB{R: r, G: g, B: b}
 			}
 		}
 	}
@@ -159,68 +163,28 @@ func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
 	}
 }
 
-func nearestColor(r, g, b int) int {
-	colors := []struct{ r, g, b, code int }{
-		{0, 0, 0, 30},
-		{0, 0, 170, 34},
-		{0, 170, 0, 32},
-		{0, 170, 170, 36},
-		{170, 0, 0, 31},
-		{170, 0, 170, 35},
-		{255, 170, 0, 33},
-		{170, 170, 170, 37},
-		{85, 85, 85, 90},
-		{85, 85, 255, 94},
-		{85, 255, 85, 92},
-		{85, 255, 255, 96},
-		{255, 85, 85, 91},
-		{255, 85, 255, 95},
-		{255, 255, 85, 93},
-		{255, 255, 255, 97},
-	}
-
-	minDist := 1<<31 - 1
-	bestCode := 37
-	for _, c := range colors {
-		dr, dg, db := r-c.r, g-c.g, b-c.b
-		dist := dr*dr + dg*dg + db*db
-		if dist < minDist {
-			minDist = dist
-			bestCode = c.code
-		}
-	}
-	return bestCode
-}
-
 func (s *Style) toANSI() string {
-	var codes []int
+	var sb strings.Builder
 
 	if s.Bold {
-		codes = append(codes, 1)
+		sb.WriteString("\033[1m")
 	}
 	if s.Italic {
-		codes = append(codes, 3)
+		sb.WriteString("\033[3m")
 	}
 	if s.Underlined {
-		codes = append(codes, 4)
+		sb.WriteString("\033[4m")
+	}
+	if s.Strikethrough {
+		sb.WriteString("\033[9m")
+	}
+	if s.Obfuscated {
+		sb.WriteString("\033[8m")
 	}
 	if s.Color != nil {
-		codes = append(codes, *s.Color)
+		sb.WriteString(fmt.Sprintf("\033[38;2;%d;%d;%dm", s.Color.R, s.Color.G, s.Color.B))
 	}
 
-	if len(codes) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString("\033[")
-	for i, code := range codes {
-		if i > 0 {
-			sb.WriteString(";")
-		}
-		sb.WriteString(strconv.Itoa(code))
-	}
-	sb.WriteString("m")
 	return sb.String()
 }
 
@@ -243,7 +207,7 @@ func (s *Style) toMotd() string {
 		codes = append(codes, "§o")
 	}
 	if s.Color != nil {
-		colorName := motdColorName(*s.Color)
+		colorName := rgbToMotd(s.Color)
 		if colorName != "" {
 			codes = append(codes, colorName)
 		}
@@ -252,42 +216,42 @@ func (s *Style) toMotd() string {
 	return strings.Join(codes, "")
 }
 
-func motdColorName(code int) string {
-	switch code {
-	case 30:
+func rgbToMotd(c *ColorRGB) string {
+	switch {
+	case c.R == 0 && c.G == 0 && c.B == 0:
 		return "§0"
-	case 31:
+	case c.R == 170 && c.G == 0 && c.B == 0:
 		return "§4"
-	case 32:
+	case c.R == 0 && c.G == 170 && c.B == 0:
 		return "§2"
-	case 33:
-		return "§6"
-	case 34:
+	case c.R == 0 && c.G == 0 && c.B == 170:
 		return "§1"
-	case 35:
+	case c.R == 170 && c.G == 0 && c.B == 170:
 		return "§5"
-	case 36:
+	case c.R == 0 && c.G == 170 && c.B == 170:
 		return "§3"
-	case 37:
+	case c.R == 255 && c.G == 170 && c.B == 0:
+		return "§6"
+	case c.R == 170 && c.G == 170 && c.B == 170:
 		return "§7"
-	case 90:
+	case c.R == 85 && c.G == 85 && c.B == 85:
 		return "§8"
-	case 91:
-		return "§c"
-	case 92:
-		return "§a"
-	case 93:
-		return "§e"
-	case 94:
+	case c.R == 85 && c.G == 85 && c.B == 255:
 		return "§9"
-	case 95:
-		return "§d"
-	case 96:
+	case c.R == 85 && c.G == 255 && c.B == 85:
+		return "§a"
+	case c.R == 85 && c.G == 255 && c.B == 255:
 		return "§b"
-	case 97:
+	case c.R == 255 && c.G == 85 && c.B == 85:
+		return "§c"
+	case c.R == 255 && c.G == 85 && c.B == 255:
+		return "§d"
+	case c.R == 255 && c.G == 255 && c.B == 85:
+		return "§e"
+	case c.R == 255 && c.G == 255 && c.B == 255:
 		return "§f"
 	default:
-		return ""
+		return fmt.Sprintf("§#%02x%02x%02x", c.R, c.G, c.B)
 	}
 }
 
@@ -336,12 +300,11 @@ func (c *TextComponent) renderMotd(sb *strings.Builder, parent *Style) {
 	}
 
 	if c.Color != "" {
-		if code, ok := colorMap[c.Color]; ok {
-			style.Color = &code
+		if code, ok := basicColorMap[c.Color]; ok {
+			style.Color = &ColorRGB{R: code.R, G: code.G, B: code.B}
 		} else if strings.HasPrefix(c.Color, "#") {
 			if r, g, b, ok := parseHex(c.Color); ok {
-				c256 := nearestColor(r, g, b)
-				style.Color = &c256
+				style.Color = &ColorRGB{R: r, G: g, B: b}
 			}
 		}
 	}
