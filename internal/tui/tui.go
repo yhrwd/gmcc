@@ -803,3 +803,8 @@ func (e *Engine) render() {
 }
 
 func (e *Engine) Refresh() { e.render() }
+
+type ComponentFunc func(w, h int) []string
+
+func (f ComponentFunc) Render(w, h int) []string       { return f(w, h) }
+func (f ComponentFunc) HandleEvent(e interface{}) bool { return false }
