@@ -56,11 +56,6 @@ func Close() error {
 func Infof(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
-	if len(args) == 0 {
-		consoleLogger.Printf("%s", format)
-	} else {
-		consoleLogger.Printf(format, args...)
-	}
 	if fileLogger != nil {
 		fileLogger.Printf("[INFO] "+format, args...)
 	}
@@ -69,7 +64,6 @@ func Infof(format string, args ...interface{}) {
 func Warnf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
-	consoleLogger.Printf("[WARN] "+format, args...)
 	if fileLogger != nil {
 		fileLogger.Printf("[WARN] "+format, args...)
 	}
@@ -78,7 +72,6 @@ func Warnf(format string, args ...interface{}) {
 func Errorf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
-	consoleLogger.Printf("[ERROR] "+format, args...)
 	if fileLogger != nil {
 		fileLogger.Printf("[ERROR] "+format, args...)
 	}
