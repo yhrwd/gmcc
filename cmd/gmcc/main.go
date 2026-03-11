@@ -8,10 +8,11 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient"
-	"gmcc/internal/terminal"
 )
 
 var Version = "dev"
@@ -22,15 +23,11 @@ func main() {
 		configPath = v
 	}
 
-	if !terminal.IsTerminal() {
-		runHeadless(configPath)
-		return
-	}
-
 	runInteractive(configPath)
 }
 
 func runInteractive(configPath string) {
+	fmt.Println()
 	fmt.Println(" ═══ gmcc - Minecraft 控制台客户端 ═══ ")
 	fmt.Printf(" 版本: %s\n", Version)
 	fmt.Println(" ─────────────────────────────────────────────")
@@ -53,100 +50,154 @@ func runInteractive(configPath string) {
 	fmt.Printf("  服务器: %s\n", cfg.Server.Address)
 	fmt.Println()
 
-	term := terminal.New()
-	if err := term.Start(); err != nil {
-		fmt.Printf("[\033[31m错误\033[0m] 终端初始化失败: %v\n", err)
-		os.Exit(1)
-	}
-	defer term.Stop()
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer stop()
-
 	client := mcclient.New(cfg)
 
 	client.SetChatHandler(func(msg mcclient.ChatMessage) {
 		if msg.RawJSON != "" {
 			comp, err := mcclient.ParseTextComponent(msg.RawJSON)
 			if err == nil {
-				term.PrintLine(comp.ToANSI())
+				fmt.Println(comp.ToANSI())
 				return
 			}
 		}
-		term.PrintLine(msg.PlainText)
+		fmt.Println(msg.PlainText)
 	})
 
-	term.SetMessageHook(func(msg string) {
-		if client.IsReady() {
-			if err := client.SendMessage(msg); err != nil {
-				term.Printf("[\033[31m发送失败\033[0m] %v", err)
-			}
-		}
-	})
+	fmt.Printf("正在连接 %s ...\n\n", cfg.Server.Address)
 
-	term.SetCommandHook(func(cmd string) {
-		if client.IsReady() {
-			if err := client.SendCommand(cmd); err != nil {
-				term.Printf("[\033[31m命令失败\033[0m] %v", err)
-			}
-		}
-	})
-
-	term.Printf("\n正在连接 %s ...", cfg.Server.Address)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- client.Run(ctx)
 	}()
 
+	history := []string{}
+	historyIndex := -1
+	input := ""
+
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err == nil {
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			buf := make([]byte, 1)
+			n, err := os.Stdin.Read(buf)
+			if err != nil || n == 0 {
+				return
+			}
+
+			switch buf[0] {
+			case 13: // Enter
+				fmt.Println()
+				if input != "" {
+					history = append(history, input)
+					if len(history) > 100 {
+						history = history[1:]
+					}
+					historyIndex = -1
+
+					if strings.HasPrefix(input, "/") {
+						if client.IsReady() {
+							if err := client.SendCommand(strings.TrimPrefix(input, "/")); err != nil {
+								fmt.Printf("[命令失败] %v\n", err)
+							}
+						}
+					} else {
+						if client.IsReady() {
+							if err := client.SendMessage(input); err != nil {
+								fmt.Printf("[发送失败] %v\n", err)
+							}
+						}
+					}
+				}
+				input = ""
+				fmt.Print("\033[2K\r> ")
+
+			case 127: // Backspace
+				if len(input) > 0 {
+					input = input[:len(input)-1]
+					fmt.Print("\b \b")
+				}
+
+			case 27: // Escape
+				seq := make([]byte, 2)
+				n, _ := os.Stdin.Read(seq)
+				if n < 2 {
+					continue
+				}
+				switch seq[1] {
+				case 65: // Up
+					if len(history) > 0 {
+						fmt.Print("\r\033[K> ")
+						if historyIndex == -1 {
+							historyIndex = len(history) - 1
+						} else if historyIndex > 0 {
+							historyIndex--
+						}
+						input = history[historyIndex]
+						fmt.Print(input)
+					}
+				case 66: // Down
+					if historyIndex != -1 {
+						fmt.Print("\r\033[K> ")
+						if historyIndex < len(history)-1 {
+							historyIndex++
+							input = history[historyIndex]
+						} else {
+							historyIndex = -1
+							input = ""
+						}
+						fmt.Print(input)
+					}
+				case 9: // Tab
+					if strings.HasPrefix(input, "/") {
+						cmds := []string{"/help", "/quit", "/tps", "/money", "/balance", "/pay", "/msg", "/tell", "/r", "/afk", "/near", "/spawn", "/warp", "/bal"}
+						var matches []string
+						for _, cmd := range cmds {
+							if strings.HasPrefix(cmd, input) {
+								matches = append(matches, cmd)
+							}
+						}
+						if len(matches) == 1 {
+							fmt.Print("\r\033[K> ")
+							input = matches[0] + " "
+							fmt.Print(input)
+						} else if len(matches) > 1 {
+							fmt.Println()
+							for _, m := range matches {
+								fmt.Print(m, " ")
+							}
+							fmt.Println()
+							fmt.Print("> " + input)
+						}
+					}
+				}
+
+			default:
+				if buf[0] >= 32 && buf[0] < 127 {
+					input += string(buf[0])
+					fmt.Print(string(buf[0]))
+				}
+			}
+		}
+	}()
+
 	select {
 	case err := <-errCh:
 		if err != nil {
-			term.Printf("[\033[31m客户端退出\033[0m] %v", err)
-		} else {
-			term.PrintLine("[\033[33m提示\033[0m] 客户端已断开连接")
+			fmt.Printf("\n[客户端退出] %v\n", err)
 		}
 	case <-ctx.Done():
-		term.PrintLine("[\033[33m提示\033[0m] 正在断开连接...")
+		fmt.Println("\n[提示] 断开连接")
 	}
-
-	term.PrintLine("[\033[90m提示\033[0m] 按 Ctrl+C 退出")
-}
-
-func runHeadless(configPath string) {
-	logx.Infof("gmcc version: %s", Version)
-	logx.Infof("正在加载配置文件: %s", configPath)
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		logx.Errorf("配置加载失败: %v", err)
-		logx.Infof("请修改配置文件后重新运行程序")
-		os.Exit(1)
-	}
-
-	if err := logx.Init(cfg.Log.LogDir, cfg.Log.EnableFile, cfg.Log.MaxSize, cfg.Log.Debug); err != nil {
-		logx.Errorf("日志初始化失败: %v", err)
-		os.Exit(1)
-	}
-	defer logx.Close()
-
-	logx.Infof("配置加载成功")
-	logx.Infof("Player ID: %s", cfg.Account.PlayerID)
-	logx.Infof("Use Official Auth: %t", cfg.Account.UseOfficialAuth)
-	logx.Infof("Server Address: %s", cfg.Server.Address)
-	logx.Infof("Log Directory: %s", cfg.Log.LogDir)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	client := mcclient.New(cfg)
-	if err := client.Run(ctx); err != nil {
-		logx.Errorf("客户端退出: %v", err)
-		os.Exit(1)
-	}
-}
-
-func isQuitCommand(input string) bool {
-	cmd := strings.ToLower(strings.TrimSpace(input))
-	return cmd == "quit" || cmd == "exit" || cmd == "/quit" || cmd == "/exit"
 }
