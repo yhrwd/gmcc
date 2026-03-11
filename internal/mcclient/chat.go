@@ -639,7 +639,7 @@ func extractSignableCommandTargets(nodes []commandNodeWire, rootIndex int32) map
 			pathSeen[idx] = true
 			node := nodes[idx]
 
-			if node.NodeType == 2 && node.ParserID == 20 {
+			if node.NodeType == 2 && (node.ParserID == 5 || node.ParserID == 20) {
 				target := signableCommandTarget{
 					ArgumentName: node.Name,
 					SliceIndex:   depth,
