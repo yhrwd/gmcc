@@ -91,7 +91,7 @@ func (t *TUI) Run(ctx context.Context) error {
 	t.addLog("\x1b[90m正在连接...\x1b[0m")
 	t.addLog("")
 
-	inputCh := make(chan byte, 256)
+	inputCh := make(chan []byte, 256)
 	go t.readInput(inputCh)
 
 	t.render()
@@ -108,11 +108,11 @@ func (t *TUI) Run(ctx context.Context) error {
 				time.Sleep(2 * time.Second)
 			}
 			return err
-		case b, ok := <-inputCh:
+		case data, ok := <-inputCh:
 			if !ok {
 				return nil
 			}
-			if t.handleInput(b, inputCh) {
+			if t.handleInput(data, inputCh) {
 				return nil
 			}
 		case <-t.redrawCh:
@@ -121,22 +121,29 @@ func (t *TUI) Run(ctx context.Context) error {
 	}
 }
 
-func (t *TUI) readInput(ch chan byte) {
-	buf := make([]byte, 1)
+func (t *TUI) readInput(ch chan []byte) {
+	buf := make([]byte, 4)
 	for {
 		n, err := os.Stdin.Read(buf)
 		if err != nil || n == 0 {
 			close(ch)
 			return
 		}
+		data := make([]byte, n)
+		copy(data, buf[:n])
 		select {
-		case ch <- buf[0]:
+		case ch <- data:
 		default:
 		}
 	}
 }
 
-func (t *TUI) handleInput(b byte, inputCh chan byte) bool {
+func (t *TUI) handleInput(data []byte, inputCh chan []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+
+	b := data[0]
 	switch b {
 	case 3:
 		t.addLog("\x1b[33m[提示] 退出\x1b[0m")
@@ -159,7 +166,10 @@ func (t *TUI) handleInput(b byte, inputCh chan byte) bool {
 		t.requestRedraw()
 	case 127, 8:
 		if len(t.inputBuf) > 0 {
-			t.inputBuf = t.inputBuf[:len(t.inputBuf)-1]
+			runes := []rune(t.inputBuf)
+			if len(runes) > 0 {
+				t.inputBuf = string(runes[:len(runes)-1])
+			}
 			t.requestRedraw()
 		}
 	case 27:
@@ -173,7 +183,7 @@ func (t *TUI) handleInput(b byte, inputCh chan byte) bool {
 				if !ok {
 					break seqLoop
 				}
-				seq = append(seq, b2)
+				seq = append(seq, b2...)
 				if len(seq) >= 2 && seq[0] == '[' {
 					switch seq[1] {
 					case 'A':
@@ -211,8 +221,8 @@ func (t *TUI) handleInput(b byte, inputCh chan byte) bool {
 			}
 		}
 	default:
-		if b >= 32 && b < 127 {
-			t.inputBuf += string(b)
+		if b >= 32 {
+			t.inputBuf += string(data)
 			t.requestRedraw()
 		}
 	}

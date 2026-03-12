@@ -369,7 +369,7 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 
 func (c *Client) emitChat(chat ChatMessage) {
 	if strings.TrimSpace(chat.RawJSON) != "" {
-		logx.Debugf("聊天: %s", chat.RawJSON)
+		logx.Infof("[聊天] %s", chat.RawJSON)
 	}
 
 	if c.chatHandler != nil {
