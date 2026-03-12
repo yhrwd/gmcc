@@ -577,10 +577,3 @@ func parsePrivateKeyPEM(privateKeyPEM string) (*rsa.PrivateKey, error) {
 	}
 	return nil, fmt.Errorf("不支持的 PEM 私钥类型: %s", block.Type)
 }
-
-func shortString(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
-}

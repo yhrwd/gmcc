@@ -109,13 +109,11 @@ const (
 )
 
 type protocolFeatures struct {
-	HasConfigurationState bool
-	SignatureEncryption   bool
+	SignatureEncryption bool
 }
 
 var features774 = protocolFeatures{
-	HasConfigurationState: true,
-	SignatureEncryption:   false,
+	SignatureEncryption: false,
 }
 
 var loginClientPacketNames = map[int32]string{

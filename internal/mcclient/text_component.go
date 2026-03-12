@@ -31,9 +31,8 @@ type ClickEvent struct {
 }
 
 type HoverEvent struct {
-	Action      string         `json:"action"`
-	Value       *TextComponent `json:"value,omitempty"`
-	ValueString string         `json:"value"`
+	Action string         `json:"action"`
+	Value  *TextComponent `json:"value,omitempty"`
 }
 
 var basicColorMap = map[string]ColorRGB{
