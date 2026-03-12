@@ -1,20 +1,33 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient"
-	"gmcc/internal/tui"
 )
 
 var Version = "dev"
+
+type App struct {
+	client  *mcclient.Client
+	cfg     *config.Config
+	logs    []string
+	maxLogs int
+	mu      sync.RWMutex
+	running bool
+	history []string
+	histIdx int
+}
 
 func main() {
 	configPath := "config.yaml"
@@ -34,35 +47,27 @@ func main() {
 	}
 	defer logx.Close()
 
-	runTUI(cfg)
+	runApp(cfg)
 }
 
-type App struct {
-	engine *tui.Engine
-	client *mcclient.Client
-	cfg    *config.Config
-
-	input   *tui.InputWidget
-	logs    []string
-	maxLogs int
-}
-
-func runTUI(cfg *config.Config) {
-	engine, err := tui.NewEngine()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[错误] TUI 初始化失败: %v\n", err)
-		os.Exit(1)
-	}
+func runApp(cfg *config.Config) {
+	fmt.Println()
+	fmt.Println(" ═══ gmcc - Minecraft 控制台客户端 ═══")
+	fmt.Printf(" 版本: %s\n", Version)
+	fmt.Println(" ─────────────────────────────────────────────")
+	fmt.Println()
+	fmt.Printf("[✓] 配置加载成功\n")
+	fmt.Printf("  玩家: %s\n", cfg.Account.PlayerID)
+	fmt.Printf("  服务器: %s\n", cfg.Server.Address)
+	fmt.Println()
 
 	app := &App{
-		engine:  engine,
+		maxLogs: 100,
+		logs:    make([]string, 0, 100),
+		history: make([]string, 0, 100),
+		histIdx: -1,
 		cfg:     cfg,
-		maxLogs: 200,
-		logs:    make([]string, 0, 200),
-		input:   tui.NewInputWidget(),
 	}
-
-	app.input.Focus()
 
 	app.client = mcclient.New(cfg)
 	app.client.SetChatHandler(func(msg mcclient.ChatMessage) {
@@ -80,35 +85,7 @@ func runTUI(cfg *config.Config) {
 		app.addLog(text)
 	})
 
-	app.engine.On(tui.EventKey, func(e interface{}) bool {
-		ke := e.(tui.KeyEvent)
-		if ke.Key == tui.KeyEscape {
-			app.engine.Stop()
-			return true
-		}
-		return app.input.HandleEvent(e)
-	})
-
-	app.input.OnSubmit = func(text string) {
-		if text == "" {
-			return
-		}
-		app.addLog("> " + text)
-		if strings.HasPrefix(text, "/") {
-			cmd := strings.TrimPrefix(text, "/")
-			if app.client.IsReady() {
-				if err := app.client.SendCommand(cmd); err != nil {
-					app.addLog(fmt.Sprintf("[命令失败] %v", err))
-				}
-			}
-		} else {
-			if app.client.IsReady() {
-				if err := app.client.SendMessage(text); err != nil {
-					app.addLog(fmt.Sprintf("[发送失败] %v", err))
-				}
-			}
-		}
-	}
+	fmt.Printf("正在连接 %s ...\n\n", cfg.Server.Address)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -118,119 +95,86 @@ func runTUI(cfg *config.Config) {
 		errCh <- app.client.Run(ctx)
 	}()
 
-	go func() {
-		select {
-		case <-ctx.Done():
-			app.addLog("[提示] 断开连接")
-			app.engine.Stop()
-		case err := <-errCh:
-			if err != nil {
-				app.addLog(fmt.Sprintf("[客户端退出] %v", err))
-			}
-			app.engine.Stop()
+	// Wait for connection
+	time.Sleep(2 * time.Second)
+
+	app.runInputLoop(ctx)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			fmt.Printf("\n[客户端退出] %v\n", err)
 		}
-	}()
-
-	app.addLog(fmt.Sprintf("版本: %s", Version))
-	app.addLog(fmt.Sprintf("玩家: %s", cfg.Account.PlayerID))
-	app.addLog(fmt.Sprintf("服务器: %s", cfg.Server.Address))
-	app.addLog("正在连接...")
-	app.addLog("")
-
-	app.engine.SetLayout(tui.ComponentFunc(func(w, h int) []string {
-		return app.render(w, h)
-	}))
-
-	if err := app.engine.Start(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "[错误] %v\n", err)
+	case <-ctx.Done():
+		fmt.Println("\n[提示] 断开连接")
 	}
 }
 
 func (a *App) addLog(text string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.logs = append(a.logs, text)
 	if len(a.logs) > a.maxLogs {
 		a.logs = a.logs[1:]
 	}
+	fmt.Println(text)
 }
 
-func (a *App) render(w, h int) []string {
-	lines := make([]string, h)
-	for i := range lines {
-		lines[i] = strings.Repeat(" ", w)
-	}
+func (a *App) runInputLoop(ctx context.Context) {
+	reader := bufio.NewReader(os.Stdin)
 
-	if h < 6 {
-		return lines
-	}
-
-	lineNum := 0
-	lines[lineNum] = fmt.Sprintf(" ╔%s╗", strings.Repeat("─", w-2))
-	lineNum++
-
-	player := a.client.Player
-	if player != nil {
-		hp, _, food, _ := player.GetHealth()
-		x, y, z := player.GetPosition()
-		gm := player.GameMode.String()
-		status := fmt.Sprintf(" HP: %.0f | Food: %d | Pos: %.1f,%.1f,%.1f | Mode: %s ", hp, food, x, y, z, gm)
-		if len(status) > w-4 {
-			status = status[:w-4]
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
-		lines[lineNum] = fmt.Sprintf(" │%s│", status+strings.Repeat(" ", w-4-len(status)))
+
+		fmt.Print("> ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		a.addToHistory(line)
+		a.processInput(line, ctx)
+	}
+}
+
+func (a *App) addToHistory(cmd string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.history) == 0 || a.history[len(a.history)-1] != cmd {
+		a.history = append(a.history, cmd)
+		if len(a.history) > 100 {
+			a.history = a.history[1:]
+		}
+	}
+	a.histIdx = -1
+}
+
+func (a *App) processInput(line string, ctx context.Context) {
+	if strings.HasPrefix(line, "/") {
+		cmd := strings.TrimPrefix(line, "/")
+		if a.client.IsReady() {
+			if err := a.client.SendCommand(cmd); err != nil {
+				a.addLog(fmt.Sprintf("[命令失败] %v", err))
+			}
+		} else {
+			a.addLog("[提示] 尚未连接到服务器")
+		}
 	} else {
-		title := fmt.Sprintf(" gmcc v%s - %s ", Version, a.cfg.Account.PlayerID)
-		if len(title) > w-4 {
-			title = title[:w-4]
+		if a.client.IsReady() {
+			if err := a.client.SendMessage(line); err != nil {
+				a.addLog(fmt.Sprintf("[发送失败] %v", err))
+			}
+		} else {
+			a.addLog("[提示] 尚未连接到服务器")
 		}
-		lines[lineNum] = fmt.Sprintf(" │%s│", title+strings.Repeat(" ", w-4-len(title)))
 	}
-	lineNum++
-	lines[lineNum] = fmt.Sprintf(" ╚%s╝", strings.Repeat("─", w-2))
-	lineNum++
-
-	logsStart := 0
-	maxLogsDisplay := h - lineNum - 3
-	if maxLogsDisplay < 1 {
-		maxLogsDisplay = 1
-	}
-	if len(a.logs) > maxLogsDisplay {
-		logsStart = len(a.logs) - maxLogsDisplay
-	}
-
-	for _, log := range a.logs[logsStart:] {
-		if lineNum >= h-3 {
-			break
-		}
-		runes := []rune(log)
-		if len(runes) > w {
-			runes = runes[:w]
-		}
-		lines[lineNum] = string(runes) + strings.Repeat(" ", w-len(runes))
-		lineNum++
-	}
-
-	for lineNum < h-3 {
-		lines[lineNum] = strings.Repeat(" ", w)
-		lineNum++
-	}
-
-	inputLine := a.input.Value
-	if len(inputLine) > w-3 {
-		inputLine = inputLine[:w-3]
-	}
-	lines[lineNum] = "> " + inputLine + strings.Repeat(" ", w-3-len(inputLine))
-	lineNum++
-
-	for lineNum < h {
-		lines[lineNum] = strings.Repeat(" ", w)
-		lineNum++
-	}
-
-	footer := " Ctrl+C/Esc:退出 | Up/Dn:历史 "
-	if len(footer) > w {
-		footer = footer[:w]
-	}
-	lines[h-1] = footer + strings.Repeat(" ", w-len(footer))
-
-	return lines
 }
