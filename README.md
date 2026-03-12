@@ -100,20 +100,26 @@ internal/
     codec.go                 # 协议编解码
     chat.go                  # 聊天/命令处理
     chat_parser.go           # 聊天 JSON 解析
+    handlers_*.go            # 各状态包处理
+    text_component.go        # 文本组件解析
     protocol_774.go          # 协议常量定义
+    utils.go                 # 工具函数
   nbt/
     decode.go                # NBT 解码器
     encode.go                # NBT 编码器
     snbt.go                  # SNBT 解析器
     path.go                  # NBT 路径查询
-    cesu8.go                 # CESU-8 转换
+    nbt.go                   # CESU-8 转换
+  player/
+    player.go                # 玩家状态管理
+    inventory.go             # 背包系统
   session/
     cache.go                 # 会话令牌缓存
+  tui/
+    tui.go                   # TUI 界面
 
 pkg/
   httpx/                     # HTTP 工具
-  rwfile/                    # 文件读写工具
-  cryptox/                   # 加解密工具
 ```
 
 ## 编译

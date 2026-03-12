@@ -97,17 +97,16 @@ gmcc/
 │   ├── mcclient/          # 客户端核心
 │   │   ├── client.go      # 状态机和主循环
 │   │   ├── codec.go       # 协议编解码
-│   │   ├── chat.go        # 聊天/命令
-│   │   ├── protocol_774.go# 协议常量
-│   │   └── text_component.go # 文本组件解析
+│   │   ├── chat.go         # 聊天/命令
+│   │   ├── handlers_*.go   # 各状态包处理
+│   │   ├── text_component.go # 文本组件解析
+│   │   └── protocol_774.go # 协议常量
 │   ├── nbt/               # NBT 数据处理
 │   ├── player/            # 玩家信息管理
 │   ├── session/           # 会话缓存
 │   └── tui/               # TUI 框架
 ├── pkg/                   # 公共工具
-│   ├── httpx/             # HTTP 工具
-│   ├── rwfile/            # 文件读写
-│   └── cryptox/           # 加解密工具
+│   └── httpx/             # HTTP 工具
 ├── docs/                  # 文档
 └── .knowledge/            # 协议知识库
 ```

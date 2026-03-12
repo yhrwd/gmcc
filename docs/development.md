@@ -48,7 +48,11 @@ gmcc/
 │   │   ├── chat.go           # 聊天消息、命令发送
 │   │   ├── chat_parser.go    # 聊天 JSON 解析
 │   │   ├── text_component.go # 文本组件、ANSI 转换
-│   │   └── player.go         # 玩家数据管理（新增）
+│   │   ├── handlers_preplay.go # 登录/配置阶段包处理
+│   │   ├── handlers_play.go    # 游戏阶段包处理
+│   │   ├── handlers_player.go  # 玩家相关包处理
+│   │   ├── handlers_chat.go    # 聊天包处理
+│   │   └── utils.go            # 工具函数
 │   │
 │   ├── nbt/                  # NBT 数据处理
 │   │   ├── nbt.go            # 类型定义
@@ -58,36 +62,19 @@ gmcc/
 │   │   ├── path.go           # 路径查询
 │   │   └── raw.go            # 原始 NBT
 │   │
-│   ├── player/               # 玩家信息管理（新增）
+│   ├── player/               # 玩家信息管理
 │   │   ├── player.go         # 玩家状态、位置、背包
-│   │   ├── inventory.go      # 背包管理
-│   │   └── item.go           # 物品数据结构
+│   │   └── inventory.go      # 背包管理
 │   │
 │   ├── session/              # 会话缓存
 │   │   └── cache.go          # 令牌持久化
 │   │
-│   └── tui/                  # TUI 框架（新增）
-│       ├── screen.go         # 屏幕、光标、双缓冲
-│       ├── event.go          # 事件循环、输入处理
-│       ├── renderer.go       # 渲染器
-│       ├── component.go      # 组件接口
-│       ├── layout.go         # 布局管理
-│       ├── theme.go          # 主题配置
-│       └── widgets/          # 内置组件
-│           ├── box.go        # 容器
-│           ├── text.go       # 文本
-│           ├── input.go      # 输入框
-│           ├── list.go       # 列表
-│           └── table.go      # 表格
+│   └── tui/                  # TUI 框架
+│       └── tui.go            # 终端界面
 │
 ├── pkg/                      # 公共工具包
-│   ├── httpx/                # HTTP 客户端
-│   │   └── client.go         # 请求封装、重试
-│   ├── rwfile/               # 文件读写
-│   │   ├── string.go         # 字符串文件
-│   │   └── gob.go            # GOB 序列化
-│   └── cryptox/              # 加解密
-│       └── crypto.go         # RSA、AES 工具
+│   └── httpx/                # HTTP 客户端
+│       └── client.go         # 请求封装、重试
 │
 ├── docs/                     # 文档
 │   ├── README.md             # 文档索引
@@ -184,8 +171,6 @@ results, _ := nbt.QueryPath(data, "Inventory[].id")  // => ["diamond", "iron"]
 通用工具包：
 
 - `httpx`: HTTP 请求封装
-- `rwfile`: 文件读写工具
-- `cryptox`: 加解密工具
 
 ## 运行流程
 
