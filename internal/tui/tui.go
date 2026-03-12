@@ -288,7 +288,7 @@ func (t *TUI) render() {
 		if i >= msgHeight {
 			break
 		}
-		line := t.truncate(log, w)
+		line := truncateANSI(log, w)
 		sb.WriteString(line)
 		sb.WriteString("\r\n")
 	}
@@ -315,10 +315,51 @@ func (t *TUI) render() {
 	fmt.Print(sb.String())
 }
 
-func (t *TUI) truncate(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) > maxLen {
-		return string(runes[:maxLen])
+func visibleLen(s string) int {
+	len := 0
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		len++
 	}
-	return s
+	return len
+}
+
+func truncateANSI(s string, maxLen int) string {
+	if visibleLen(s) <= maxLen {
+		return s
+	}
+	var sb strings.Builder
+	visible := 0
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			sb.WriteRune(r)
+			continue
+		}
+		if inEscape {
+			sb.WriteRune(r)
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		if visible >= maxLen {
+			break
+		}
+		sb.WriteRune(r)
+		visible++
+	}
+	sb.WriteString("\x1b[0m")
+	return sb.String()
 }
