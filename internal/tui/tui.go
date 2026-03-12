@@ -65,7 +65,7 @@ func (t *TUI) Run(ctx context.Context) error {
 		if msg.RawJSON != "" {
 			comp, err := mcclient.ParseTextComponent(msg.RawJSON)
 			if err == nil {
-				text = comp.ToPlain()
+				text = comp.ToANSI()
 			} else {
 				text = msg.PlainText
 			}
@@ -93,19 +93,6 @@ func (t *TUI) Run(ctx context.Context) error {
 
 	inputCh := make(chan byte, 256)
 	go t.readInput(inputCh)
-
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-t.quit:
-				return
-			case <-ticker.C:
-				t.requestRedraw()
-			}
-		}
-	}()
 
 	t.render()
 
@@ -255,11 +242,12 @@ func (t *TUI) processInput(line string) {
 
 func (t *TUI) addLog(text string) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.logs = append(t.logs, text)
 	if len(t.logs) > t.maxLogs {
 		t.logs = t.logs[1:]
 	}
+	t.mu.Unlock()
+	t.requestRedraw()
 }
 
 func (t *TUI) requestRedraw() {
