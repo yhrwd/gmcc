@@ -40,6 +40,10 @@ func (c *Client) handleLoginPacket(pkt packet) error {
 		if err != nil {
 			return fmt.Errorf("解析 login_finished 失败: %w", err)
 		}
+		c.Player.SetUUID(profileUUID)
+		c.Player.SetName(profileName)
+		c.username = profileName
+
 		if profileName != "" {
 			logx.Infof("登录成功: %s (%s)", profileName, formatUUID(profileUUID))
 		} else {

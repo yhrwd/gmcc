@@ -68,6 +68,9 @@ func (c *Client) handlePlayPacket(pkt packet) error {
 		return c.sendResourcePackResponses(playServerResource, id)
 
 	case playClientLogin:
+		if err := c.handlePlayLoginPacket(pkt.Data); err != nil {
+			return err
+		}
 		if !c.inPlay {
 			c.inPlay = true
 			logx.Infof("已进入服务器, 开始挂机: %s (%s)", c.username, formatUUID(c.uuid))
@@ -101,6 +104,9 @@ func (c *Client) handlePlayPacket(pkt packet) error {
 
 	case playClientGameEvent:
 		return c.handleGameEventPacket(pkt.Data)
+
+	case playClientEntityData:
+		return c.handleEntityDataPacket(pkt.Data)
 
 	default:
 		logx.PacketLogf("未处理的 Play 数据包: id=0x%02X (%s) len=%d", pkt.ID, packetName(statePlay, pkt.ID), len(pkt.Data))

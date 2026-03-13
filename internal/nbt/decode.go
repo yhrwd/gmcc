@@ -630,6 +630,14 @@ func (d *Decoder) errorWrap(err error) error {
 	return err
 }
 
+func (d *Decoder) Skip() error {
+	tagType, err := d.readByte()
+	if err != nil {
+		return err
+	}
+	return d.skipValue(tagType)
+}
+
 func indirect(v reflect.Value, decodingNull bool) (Unmarshaler, encoding.TextUnmarshaler, reflect.Value, func()) {
 	v0 := v
 	haveAddr := false

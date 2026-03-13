@@ -170,6 +170,56 @@ func (c *Client) runOnJoinActionsAsync() {
 			logx.Warnf("发送消息失败: %v", err)
 		}
 	}
+
+	c.syncPlayerInfo()
+}
+
+func (c *Client) syncPlayerInfo() {
+	time.Sleep(5 * time.Second)
+
+	info := c.Player.GetInfo()
+	logx.Infof("=== 玩家信息同步 ===")
+	logx.Infof("名称: %v", info["name"])
+	logx.Infof("UUID: %v", info["uuid"])
+	logx.Infof("实体ID: %v", info["entity_id"])
+	logx.Infof("游戏模式: %v", info["gamemode"])
+	logx.Infof("维度: %v", info["dimension"])
+	pos := info["position"].([]float64)
+	rot := info["rotation"].([]float32)
+	logx.Infof("位置: X=%.2f, Y=%.2f, Z=%.2f", pos[0], pos[1], pos[2])
+	logx.Infof("朝向: Yaw=%.2f, Pitch=%.2f", rot[0], rot[1])
+	logx.Infof("生命值: %.1f / %.1f", info["health"], info["max_health"])
+	logx.Infof("饥饿值: %d (饱和度: %.1f)", info["food"], info["saturation"])
+	logx.Infof("氧气值: %d / 300", info["air"])
+	logx.Infof("实体生命: %.1f", info["entity_health"])
+	logx.Infof("等级: %d, 经验: %.1f%%", info["level"], info["experience"])
+	logx.Infof("手持槽位: %d", info["held_slot"])
+	logx.Infof("飞行中: %v, 可飞行: %v", info["flying"], info["can_fly"])
+	logx.Infof("在线时长: %v", info["duration"])
+
+	inventory := c.Player.Inventory.GetAll()
+	logx.Infof("=== 背包内容 ===")
+	if len(inventory) == 0 {
+		logx.Infof("背包为空（等待3秒后重试...）")
+		time.Sleep(3 * time.Second)
+		inventory = c.Player.Inventory.GetAll()
+		if len(inventory) == 0 {
+			logx.Infof("背包确实为空")
+		} else {
+			for slot, item := range inventory {
+				if item != nil {
+					logx.Infof("槽位 %d: %s x%d", slot, item.ID, item.Count)
+				}
+			}
+		}
+	} else {
+		for slot, item := range inventory {
+			if item != nil {
+				logx.Infof("槽位 %d: %s x%d", slot, item.ID, item.Count)
+			}
+		}
+	}
+	logx.Infof("==================")
 }
 
 func (c *Client) initSecureChatSession() error {

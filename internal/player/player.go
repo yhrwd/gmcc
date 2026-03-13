@@ -27,13 +27,15 @@ type Player struct {
 	Yaw, Pitch float32
 	OnGround   bool
 
-	Health     float32
-	MaxHealth  float32
-	Food       int32
-	Saturation float32
-	Level      int32
-	Experience float32
-	TotalExp   int32
+	Health       float32
+	MaxHealth    float32
+	Food         int32
+	Saturation   float32
+	Air          int32
+	EntityHealth float32
+	Level        int32
+	Experience   float32
+	TotalExp     int32
 
 	Invulnerable bool
 	Flying       bool
@@ -56,15 +58,17 @@ type Player struct {
 
 func NewPlayer() *Player {
 	return &Player{
-		Inventory:   NewInventory(),
-		Health:      20,
-		MaxHealth:   20,
-		Food:        20,
-		Saturation:  5,
-		JoinTime:    time.Now(),
-		LastUpdate:  time.Now(),
-		FlyingSpeed: 0.05,
-		FieldOfView: 0.1,
+		Inventory:    NewInventory(),
+		Health:       20,
+		MaxHealth:    20,
+		Food:         20,
+		Saturation:   5,
+		Air:          300,
+		EntityHealth: 20,
+		JoinTime:     time.Now(),
+		LastUpdate:   time.Now(),
+		FlyingSpeed:  0.05,
+		FieldOfView:  0.1,
 	}
 }
 
@@ -168,6 +172,30 @@ func (p *Player) GetHealth() (float32, float32, int32, float32) {
 	return p.Health, p.MaxHealth, p.Food, p.Saturation
 }
 
+func (p *Player) UpdateAir(air int32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Air = air
+}
+
+func (p *Player) GetAir() int32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.Air
+}
+
+func (p *Player) UpdateEntityHealth(health float32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.EntityHealth = health
+}
+
+func (p *Player) GetEntityHealth() float32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.EntityHealth
+}
+
 func (p *Player) UpdateExperience(level int32, experience, totalExp float32) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -247,24 +275,26 @@ func (p *Player) GetInfo() map[string]interface{} {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return map[string]interface{}{
-		"name":       p.Name,
-		"uuid":       formatUUID(p.UUID),
-		"entity_id":  p.EntityID,
-		"gamemode":   p.GameMode.String(),
-		"dimension":  p.Dimension,
-		"position":   []float64{p.X, p.Y, p.Z},
-		"rotation":   []float32{p.Yaw, p.Pitch},
-		"health":     p.Health,
-		"max_health": p.MaxHealth,
-		"food":       p.Food,
-		"saturation": p.Saturation,
-		"level":      p.Level,
-		"experience": p.Experience,
-		"held_slot":  p.HeldSlot,
-		"flying":     p.Flying,
-		"can_fly":    p.CanFly,
-		"join_time":  p.JoinTime.Format("2006-01-02 15:04:05"),
-		"duration":   time.Since(p.JoinTime).String(),
+		"name":          p.Name,
+		"uuid":          formatUUID(p.UUID),
+		"entity_id":     p.EntityID,
+		"gamemode":      p.GameMode.String(),
+		"dimension":     p.Dimension,
+		"position":      []float64{p.X, p.Y, p.Z},
+		"rotation":      []float32{p.Yaw, p.Pitch},
+		"health":        p.Health,
+		"max_health":    p.MaxHealth,
+		"food":          p.Food,
+		"saturation":    p.Saturation,
+		"air":           p.Air,
+		"entity_health": p.EntityHealth,
+		"level":         p.Level,
+		"experience":    p.Experience,
+		"held_slot":     p.HeldSlot,
+		"flying":        p.Flying,
+		"can_fly":       p.CanFly,
+		"join_time":     p.JoinTime.Format("2006-01-02 15:04:05"),
+		"duration":      time.Since(p.JoinTime).String(),
 	}
 }
 
