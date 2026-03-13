@@ -1,11 +1,24 @@
 package player
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
 
 type GameMode int
+
+type SlotData struct {
+	ID    int32
+	Count int32
+}
+
+func (s *SlotData) IDToString() string {
+	if s == nil || s.ID == 0 {
+		return ""
+	}
+	return fmt.Sprintf("minecraft:%d", s.ID)
+}
 
 const (
 	GameModeSurvival GameMode = iota
@@ -263,6 +276,43 @@ func (p *Player) UpdateInventorySlot(windowID int8, stateID int32, slot int8, it
 
 func (p *Player) ClearInventory() {
 	p.Inventory.Clear()
+}
+
+func (p *Player) UpdateInventory(windowID int32, items []*SlotData, carriedItem *SlotData) {
+	if windowID != 0 {
+		return
+	}
+	p.mu.Lock()
+	p.Inventory.Clear()
+	for i, item := range items {
+		if item != nil && item.Count > 0 {
+			p.Inventory.SetSlot(int8(i), &Item{
+				ID:    item.IDToString(),
+				Count: item.Count,
+			})
+		}
+	}
+	if carriedItem != nil && carriedItem.Count > 0 {
+		p.Inventory.SetSlot(-1, &Item{
+			ID:    carriedItem.IDToString(),
+			Count: carriedItem.Count,
+		})
+	}
+	p.mu.Unlock()
+}
+
+func (p *Player) UpdateSlot(windowID int32, slot int32, item *SlotData) {
+	if windowID != 0 {
+		return
+	}
+	if item != nil && item.Count > 0 {
+		p.Inventory.SetSlot(int8(slot), &Item{
+			ID:    item.IDToString(),
+			Count: item.Count,
+		})
+	} else {
+		p.Inventory.SetSlot(int8(slot), nil)
+	}
 }
 
 func (p *Player) GetDuration() time.Duration {

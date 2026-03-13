@@ -3,9 +3,11 @@ package mcclient
 import (
 	"crypto/md5"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net"
 	"strconv"
@@ -123,4 +125,8 @@ func readU8(r io.Reader) (byte, error) {
 		return 0, err
 	}
 	return b[0], nil
+}
+
+func readFloat32FromBytes(b []byte) float32 {
+	return math.Float32frombits(binary.BigEndian.Uint32(b))
 }
