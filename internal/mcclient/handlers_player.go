@@ -39,11 +39,12 @@ func (c *Client) handleSetExperiencePacket(data []byte) error {
 		return nil
 	}
 
-	experienceBar, _ := readFloat32(r)
+	var expBar float32
+	binary.Read(r, binary.BigEndian, &expBar)
 	level, _ := readVarIntFromReader(r)
-	totalExperience, _ := readVarIntFromReader(r)
+	totalExp, _ := readVarIntFromReader(r)
 
-	c.Player.UpdateExperience(int32(level), experienceBar, float32(totalExperience))
+	c.Player.UpdateExperience(int32(level), expBar, float32(totalExp))
 	return nil
 }
 
@@ -58,71 +59,6 @@ func (c *Client) handleSetHeldSlotPacket(data []byte) error {
 	return nil
 }
 
-func (c *Client) handleContainerContentPacket(data []byte) error {
-	r := bytes.NewReader(data)
-
-	windowID, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil
-	}
-	stateID, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil
-	}
-	count, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil
-	}
-
-	logx.Debugf("收到 container_content: windowID=%d, stateID=%d, slotCount=%d", windowID, stateID, count)
-
-	if count > 1000 {
-		count = 1000
-	}
-
-	for i := int32(0); i < count; i++ {
-		item, _ := readSlotData(r)
-		if item != nil {
-			pItem := &player.Item{ID: fmt.Sprintf("%d", item.ID), Count: item.Count}
-			c.Player.UpdateInventorySlot(int8(windowID), stateID, int8(i), pItem)
-		} else {
-			c.Player.UpdateInventorySlot(int8(windowID), stateID, int8(i), nil)
-		}
-	}
-
-	readSlotData(r)
-
-	return nil
-}
-
-func (c *Client) handleContainerSlotPacket(data []byte) error {
-	r := bytes.NewReader(data)
-
-	windowID, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil
-	}
-	stateID, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil
-	}
-	slot, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil
-	}
-
-	item, _ := readSlotData(r)
-
-	if item != nil {
-		pItem := &player.Item{ID: fmt.Sprintf("%d", item.ID), Count: item.Count}
-		c.Player.UpdateInventorySlot(int8(windowID), stateID, int8(slot), pItem)
-	} else {
-		c.Player.UpdateInventorySlot(int8(windowID), stateID, int8(slot), nil)
-	}
-
-	return nil
-}
-
 func (c *Client) handleGameEventPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	if r.Len() < 5 {
@@ -130,7 +66,8 @@ func (c *Client) handleGameEventPacket(data []byte) error {
 	}
 
 	eventType, _ := readU8(r)
-	value, _ := readFloat32(r)
+	var value float32
+	binary.Read(r, binary.BigEndian, &value)
 
 	if eventType == 3 && value >= 0 && value <= 3 {
 		mode := player.GameMode(int(value))
@@ -214,7 +151,9 @@ func (c *Client) handlePlayLoginPacket(data []byte) error {
 	}
 	c.Player.SetDimension(dimensionName)
 
-	_, _ = readInt64FromReader(r)
+	var hashedSeed int64
+	binary.Read(r, binary.BigEndian, &hashedSeed)
+	_ = hashedSeed
 
 	gameMode, err := readU8(r)
 	if err != nil {
@@ -222,10 +161,13 @@ func (c *Client) handlePlayLoginPacket(data []byte) error {
 	}
 	c.Player.SetGameMode(player.GameMode(int(gameMode)))
 
-	_, _ = readU8(r)
+	prevGameMode, _ := readU8(r)
+	_ = prevGameMode
 
-	_, _ = readBoolFromReader(r)
-	_, _ = readBoolFromReader(r)
+	isDebug, _ := readBoolFromReader(r)
+	_ = isDebug
+	isFlat, _ := readBoolFromReader(r)
+	_ = isFlat
 
 	hasDeathLocation, err := readBoolFromReader(r)
 	if err != nil {
@@ -235,12 +177,17 @@ func (c *Client) handlePlayLoginPacket(data []byte) error {
 		if _, err := readStringFromReader(r); err != nil {
 			return fmt.Errorf("读取 death_dimension 失败: %w", err)
 		}
-		_, _ = readInt64FromReader(r)
+		var deathPos int64
+		binary.Read(r, binary.BigEndian, &deathPos)
+		_ = deathPos
 	}
 
-	_, _ = readVarIntFromReader(r)
-	_, _ = readVarIntFromReader(r)
-	_, _ = readBoolFromReader(r)
+	portalCooldown, _ := readVarIntFromReader(r)
+	_ = portalCooldown
+	seaLevel, _ := readVarIntFromReader(r)
+	_ = seaLevel
+	secureChatEnforced, _ := readBoolFromReader(r)
+	_ = secureChatEnforced
 
 	logx.Infof("登录Play阶段: EntityID=%d, 维度=%s, 游戏模式=%s", entityID, dimensionName, c.Player.GameMode.String())
 
@@ -284,7 +231,8 @@ func (c *Client) handleEntityDataPacket(data []byte) error {
 			airTicks, _ := readVarIntFromReader(r)
 			c.Player.UpdateAir(int32(airTicks))
 		case 9:
-			health, _ := readFloat32(r)
+			var health float32
+			binary.Read(r, binary.BigEndian, &health)
 			c.Player.UpdateEntityHealth(health)
 		default:
 			_ = skipMetadataValue(r, typeID)
@@ -292,12 +240,6 @@ func (c *Client) handleEntityDataPacket(data []byte) error {
 	}
 
 	return nil
-}
-
-func readFloat32(r *bytes.Reader) (float32, error) {
-	var v float32
-	err := binary.Read(r, binary.BigEndian, &v)
-	return v, err
 }
 
 func readFloat64FromReader(r *bytes.Reader) (float64, error) {
@@ -355,6 +297,257 @@ func readStringFromReader(r *bytes.Reader) (string, error) {
 	return nbt.CESU8ToUTF8(buf), nil
 }
 
+func readBytes(r *bytes.Reader, n int) []byte {
+	buf := make([]byte, n)
+	for i := 0; i < n; i++ {
+		b, err := r.ReadByte()
+		if err != nil {
+			return buf[:i]
+		}
+		buf[i] = b
+	}
+	return buf
+}
+
+func skipMetadataValue(r *bytes.Reader, typeID int32) error {
+	switch typeID {
+	case 0:
+		_, _ = r.ReadByte()
+	case 1:
+		_, _ = readVarIntFromReader(r)
+	case 2:
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+	case 3, 6, 7:
+		_ = skipNBT(r)
+	case 4:
+		_, _ = readStringFromReader(r)
+	case 5:
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+	case 8, 9:
+		_, _ = readBoolFromReader(r)
+	case 10:
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+	case 11:
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+	case 12:
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+	case 13:
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_ = skipNBT(r)
+	case 14:
+		_ = skipPrefixedArray(r, skipSlotData)
+	case 15:
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_ = skipNBT(r)
+	case 16:
+		_, _ = readInt32FromReader(r)
+		_, _ = readVarIntFromReader(r)
+		_ = skipNBT(r)
+	case 17:
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+	case 18:
+		_, _ = readInt32FromReader(r)
+	case 19:
+		_, _ = readInt32FromReader(r)
+		_ = skipNBT(r)
+	case 20:
+		if has, _ := readBoolFromReader(r); has {
+			if has2, _ := readBoolFromReader(r); has2 {
+				_, _ = readStringFromReader(r)
+				_, _ = readStringFromReader(r)
+			}
+		}
+	case 21:
+		_, _ = readInt32FromReader(r)
+		_, _ = readVarIntFromReader(r)
+		_ = skipNBT(r)
+	case 22:
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+		_, _ = readInt32FromReader(r)
+	}
+	return nil
+}
+
+func skipNBT(r *bytes.Reader) error {
+	dec := nbt.NewDecoder(r).NetworkFormat(true)
+	return dec.Skip()
+}
+
+func skipPrefixedArray(r *bytes.Reader, fn func(*bytes.Reader) error) error {
+	count, err := readVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := fn(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipSlotData(r *bytes.Reader) error {
+	count, err := readVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	if count <= 0 {
+		return nil
+	}
+	_, _ = readVarIntFromReader(r)
+	numComponentsToAdd, _ := readVarIntFromReader(r)
+	for i := int32(0); i < numComponentsToAdd; i++ {
+		if err := skipComponentData(r); err != nil {
+			return nil
+		}
+	}
+	numComponentsToRemove, _ := readVarIntFromReader(r)
+	for i := int32(0); i < numComponentsToRemove; i++ {
+		_, _ = readVarIntFromReader(r)
+	}
+	return nil
+}
+
+func skipComponentData(r *bytes.Reader) error {
+	componentType, err := readVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	return skipComponentByType(r, componentType)
+}
+
+func skipComponentByType(r *bytes.Reader, componentType int32) error {
+	switch componentType {
+	case 0:
+		return skipNBT(r)
+	case 1, 2, 3:
+		_, _ = readVarIntFromReader(r)
+	case 4:
+	case 5, 6:
+		return skipNBT(r)
+	case 7:
+		_, _ = readStringFromReader(r)
+	case 8:
+		return skipPrefixedArray(r, skipNBT)
+	case 9:
+		_, _ = readVarIntFromReader(r)
+	case 10:
+		return skipEnchantments(r)
+	case 11, 12:
+		return skipBlockPredicates(r)
+	case 13:
+		return skipAttributeModifiers(r)
+	case 14:
+		return skipCustomModelData(r)
+	case 15:
+		_, _ = readBoolFromReader(r)
+		return skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = readVarIntFromReader(r); return nil })
+	case 16:
+		_, _ = readVarIntFromReader(r)
+	case 17:
+	case 18:
+		_, _ = readBoolFromReader(r)
+	case 19:
+		return skipNBT(r)
+	case 20:
+		_, _ = readVarIntFromReader(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		_, _ = readBoolFromReader(r)
+	case 21:
+		return skipConsumable(r)
+	case 22:
+		_, _ = skipSlotData(r)
+	case 23:
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		return skipPrefixedOptional(r, func(r *bytes.Reader) error { _, _ = readStringFromReader(r); return nil })
+	case 24:
+		_, _ = readStringFromReader(r)
+	case 25:
+		return skipTool(r)
+	case 26:
+		_, _ = readVarIntFromReader(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+	case 27:
+		_, _ = readVarIntFromReader(r)
+	case 28:
+		return skipEquippable(r)
+	case 29:
+		return skipIDSet(r)
+	case 30:
+	case 31:
+		_, _ = readStringFromReader(r)
+	case 32:
+		return skipPrefixedArray(r, skipConsumeEffect)
+	case 33:
+		return skipBlocksAttacks(r)
+	case 34:
+		return skipEnchantments(r)
+	case 35:
+		_, _ = readBoolFromReader(r)
+		_, _ = readInt32FromReader(r)
+	case 36:
+		_, _ = readBoolFromReader(r)
+		_, _ = readInt32FromReader(r)
+	case 37:
+		_, _ = readVarIntFromReader(r)
+	case 38:
+		return skipNBT(r)
+	case 39:
+		_, _ = readVarIntFromReader(r)
+	case 40, 41:
+		return skipPrefixedArray(r, skipSlotData)
+	case 42:
+		return skipPotionContents(r)
+	case 43:
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+	case 44:
+		return skipPrefixedArray(r, skipPotionEffect)
+	case 45:
+		return skipWritableBookContent(r)
+	case 46:
+		return skipWrittenBookContent(r)
+	case 47:
+		return skipTrim(r)
+	case 48:
+		return skipNBT(r)
+	case 49, 50:
+		_, _ = readVarIntFromReader(r)
+		return skipNBT(r)
+	case 51:
+		return skipIDOrX(r, skipInstrument)
+	case 52:
+		_, _ = readStringFromReader(r)
+		_, _ = readBoolFromReader(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		if v, _ := readBoolFromReader(r); v {
+			_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		}
+	case 53:
+		_, _ = readStringFromReader(r)
+	case 54:
+		_, _ = readVarIntFromReader(r)
+	case 55:
+		return skipJukeboxPlayable(r)
+	}
+	return nil
+}
+
 type SlotData struct {
 	ID    int32
 	Count int32
@@ -397,237 +590,6 @@ func readSlotData(r *bytes.Reader) (*SlotData, error) {
 	}
 
 	return &SlotData{ID: itemID, Count: count}, nil
-}
-
-func skipMetadataValue(r *bytes.Reader, typeID int32) error {
-	switch typeID {
-	case 0:
-		_, _ = r.ReadByte()
-	case 1:
-		_, _ = readVarIntFromReader(r)
-	case 2:
-		_, _ = readFloat32(r)
-	case 3, 6, 7:
-		_ = skipNBT(r)
-	case 4:
-		_, _ = readStringFromReader(r)
-	case 5:
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-	case 8, 9:
-		_, _ = readBoolFromReader(r)
-	case 10:
-		_, _ = readFloat32(r)
-	case 11:
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-	case 12:
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-	case 13:
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_ = skipNBT(r)
-	case 14:
-		_ = skipPrefixedArray(r, skipSlotData)
-	case 15:
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_ = skipNBT(r)
-	case 16:
-		_, _ = readInt32FromReader(r)
-		_, _ = readVarIntFromReader(r)
-		_ = skipNBT(r)
-	case 17:
-		_, _ = readFloat32(r)
-		_, _ = readFloat32(r)
-		_, _ = readFloat32(r)
-	case 18:
-		_, _ = readInt32FromReader(r)
-	case 19:
-		_, _ = readInt32FromReader(r)
-		_ = skipNBT(r)
-	case 20:
-		if has, _ := readBoolFromReader(r); has {
-			if has2, _ := readBoolFromReader(r); has2 {
-				_, _ = readStringFromReader(r)
-				_, _ = readStringFromReader(r)
-			}
-		}
-	case 21:
-		_, _ = readInt32FromReader(r)
-		_, _ = readVarIntFromReader(r)
-		_ = skipNBT(r)
-	case 22:
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-		_, _ = readInt32FromReader(r)
-	}
-	return nil
-}
-
-func skipComponentData(r *bytes.Reader) error {
-	componentType, err := readVarIntFromReader(r)
-	if err != nil {
-		return err
-	}
-
-	return skipComponentByType(r, componentType)
-}
-
-func skipComponentByType(r *bytes.Reader, componentType int32) error {
-	switch componentType {
-	case 0:
-		return skipNBT(r)
-	case 1:
-		_, _ = readVarIntFromReader(r)
-	case 2:
-		_, _ = readVarIntFromReader(r)
-	case 3:
-		_, _ = readVarIntFromReader(r)
-	case 4:
-	case 5:
-		return skipNBT(r)
-	case 6:
-		return skipNBT(r)
-	case 7:
-		_, _ = readStringFromReader(r)
-	case 8:
-		return skipPrefixedArray(r, skipNBT)
-	case 9:
-		_, _ = readVarIntFromReader(r)
-	case 10:
-		return skipEnchantments(r)
-	case 11, 12:
-		return skipBlockPredicates(r)
-	case 13:
-		return skipAttributeModifiers(r)
-	case 14:
-		return skipCustomModelData(r)
-	case 15:
-		_, _ = readBoolFromReader(r)
-		return skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = readVarIntFromReader(r); return nil })
-	case 16:
-		_, _ = readVarIntFromReader(r)
-	case 17:
-	case 18:
-		_, _ = readBoolFromReader(r)
-	case 19:
-		return skipNBT(r)
-	case 20:
-		_, _ = readVarIntFromReader(r)
-		_, _ = readFloat32(r)
-		_, _ = readBoolFromReader(r)
-	case 21:
-		return skipConsumable(r)
-	case 22:
-		_, _ = readSlotData(r)
-	case 23:
-		_, _ = readFloat32(r)
-		return skipPrefixedOptional(r, func(r *bytes.Reader) error { _, _ = readStringFromReader(r); return nil })
-	case 24:
-		_, _ = readStringFromReader(r)
-	case 25:
-		return skipTool(r)
-	case 26:
-		_, _ = readVarIntFromReader(r)
-		_, _ = readFloat32(r)
-	case 27:
-		_, _ = readVarIntFromReader(r)
-	case 28:
-		return skipEquippable(r)
-	case 29:
-		return skipIDSet(r)
-	case 30:
-	case 31:
-		_, _ = readStringFromReader(r)
-	case 32:
-		return skipPrefixedArray(r, skipConsumeEffect)
-	case 33:
-		return skipBlocksAttacks(r)
-	case 34:
-		return skipEnchantments(r)
-	case 35:
-		_, _ = readBoolFromReader(r)
-		_, _ = readInt32FromReader(r)
-	case 36:
-		_, _ = readBoolFromReader(r)
-		_, _ = readInt32FromReader(r)
-	case 37:
-		_, _ = readVarIntFromReader(r)
-	case 38:
-		return skipNBT(r)
-	case 39:
-		_, _ = readVarIntFromReader(r)
-	case 40:
-		return skipPrefixedArray(r, skipSlotData)
-	case 41:
-		return skipPrefixedArray(r, skipSlotData)
-	case 42:
-		return skipPotionContents(r)
-	case 43:
-		_, _ = readFloat32(r)
-	case 44:
-		return skipPrefixedArray(r, skipPotionEffect)
-	case 45:
-		return skipWritableBookContent(r)
-	case 46:
-		return skipWrittenBookContent(r)
-	case 47:
-		return skipTrim(r)
-	case 48:
-		return skipNBT(r)
-	case 49, 50:
-		_, _ = readVarIntFromReader(r)
-		return skipNBT(r)
-	case 51:
-		return skipIDOrX(r, skipInstrument)
-	case 52:
-		_, _ = readStringFromReader(r)
-		_, _ = readBoolFromReader(r)
-		_, _ = readFloat32(r)
-		if v, _ := readBoolFromReader(r); v {
-			_, _ = readFloat32(r)
-		}
-	case 53:
-		_, _ = readStringFromReader(r)
-	case 54:
-		_, _ = readVarIntFromReader(r)
-	case 55:
-		return skipJukeboxPlayable(r)
-	}
-	return nil
-}
-
-func skipNBT(r *bytes.Reader) error {
-	dec := nbt.NewDecoder(r).NetworkFormat(true)
-	return dec.Skip()
-}
-
-func skipPrefixedArray(r *bytes.Reader, fn func(*bytes.Reader) error) error {
-	count, err := readVarIntFromReader(r)
-	if err != nil {
-		return err
-	}
-	for i := int32(0); i < count; i++ {
-		if err := fn(r); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func skipSlotData(r *bytes.Reader) error {
-	_, err := readSlotData(r)
-	return err
 }
 
 func skipPrefixedOptional(r *bytes.Reader, fn func(*bytes.Reader) error) error {
@@ -687,14 +649,14 @@ func skipAttributeModifiers(r *bytes.Reader) error {
 }
 
 func skipCustomModelData(r *bytes.Reader) error {
-	_ = skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = readFloat32(r); return nil })
+	_ = skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = binary.Read(r, binary.BigEndian, new(float32)); return nil })
 	_ = skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = readBoolFromReader(r); return nil })
 	_ = skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = readStringFromReader(r); return nil })
 	return skipPrefixedArray(r, func(r *bytes.Reader) error { _, _ = readInt32FromReader(r); return nil })
 }
 
 func skipConsumable(r *bytes.Reader) error {
-	_, _ = readFloat32(r)
+	_, _ = binary.Read(r, binary.BigEndian, new(float32))
 	_, _ = readVarIntFromReader(r)
 	_ = skipIDOrX(r, skipSoundEvent)
 	_, _ = readBoolFromReader(r)
@@ -704,11 +666,11 @@ func skipConsumable(r *bytes.Reader) error {
 func skipTool(r *bytes.Reader) error {
 	_ = skipPrefixedArray(r, func(r *bytes.Reader) error {
 		_ = skipIDSet(r)
-		_ = skipPrefixedOptional(r, func(r *bytes.Reader) error { _, _ = readFloat32(r); return nil })
+		_ = skipPrefixedOptional(r, func(r *bytes.Reader) error { _, _ = binary.Read(r, binary.BigEndian, new(float32)); return nil })
 		_ = skipPrefixedOptional(r, func(r *bytes.Reader) error { _, _ = readBoolFromReader(r); return nil })
 		return nil
 	})
-	_, _ = readFloat32(r)
+	_, _ = binary.Read(r, binary.BigEndian, new(float32))
 	_, _ = readVarIntFromReader(r)
 	_, _ = readBoolFromReader(r)
 	return nil
@@ -746,7 +708,7 @@ func skipConsumeEffect(r *bytes.Reader) error {
 	switch effectType {
 	case 0:
 		_, _ = readVarIntFromReader(r)
-		_, _ = readFloat32(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
 		_, _ = readVarIntFromReader(r)
 	case 1:
 		_ = skipPrefixedArray(r, skipConsumeEffect)
@@ -827,7 +789,7 @@ func skipInstrument(r *bytes.Reader) error {
 	_, _ = readStringFromReader(r)
 	_, _ = readBoolFromReader(r)
 	if v, _ := readBoolFromReader(r); v {
-		_, _ = readFloat32(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
 	}
 	return nil
 }
@@ -845,21 +807,21 @@ func skipJukeboxPlayable(r *bytes.Reader) error {
 func skipSoundEvent(r *bytes.Reader) error {
 	_, _ = readStringFromReader(r)
 	if v, _ := readBoolFromReader(r); v {
-		_, _ = readFloat32(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
 	}
 	return nil
 }
 
 func skipBlocksAttacks(r *bytes.Reader) error {
-	_, _ = readFloat32(r)
-	_, _ = readFloat32(r)
+	_, _ = binary.Read(r, binary.BigEndian, new(float32))
+	_, _ = binary.Read(r, binary.BigEndian, new(float32))
 	_ = skipPrefixedArray(r, func(r *bytes.Reader) error {
-		_, _ = readFloat32(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
 		_ = skipPrefixedOptional(r, skipIDSet)
-		_, _ = readFloat32(r)
-		_, _ = readFloat32(r)
-		_, _ = readFloat32(r)
-		_, _ = readFloat32(r)
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
+		_, _ = binary.Read(r, binary.BigEndian, new(float32))
 		return nil
 	})
 	_ = skipPrefixedOptional(r, func(r *bytes.Reader) error { _, _ = readStringFromReader(r); return nil })

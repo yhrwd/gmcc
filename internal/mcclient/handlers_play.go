@@ -54,8 +54,8 @@ func (c *Client) handlePlayPacket(pkt packet) error {
 		deltaY, _ := readFloat64FromReader(r)
 		deltaZ, _ := readFloat64FromReader(r)
 
-		yRot, _ := readFloat32(r)
-		xRot, _ := readFloat32(r)
+		yRot := readFloat32FromBytes(readBytes(r, 4))
+		xRot := readFloat32FromBytes(readBytes(r, 4))
 
 		relBits, _ := readInt32(r)
 
