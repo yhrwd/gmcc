@@ -69,16 +69,13 @@ func getDeviceCode(clientID string) (*DeviceCodeResponse, error) {
 
 // Poll DeviceCode Token 使用从 DeviceCode 请求得到的响应轮询
 func pollDeviceCodeToken(clientID string, devResp *DeviceCodeResponse) (*TokenResponse, error) {
-	form := url.Values{}
-	form.Set("client_id", clientID)
-	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	form.Set("device_code", devResp.DeviceCode)
-
-	interval := time.Duration(devResp.Interval) * time.Second
-	if interval <= 0 {
-		interval = 5 * time.Second
+	form := url.Values{
+		"client_id":   {clientID},
+		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		"device_code": {devResp.DeviceCode},
 	}
 
+	interval := time.Duration(max(devResp.Interval, 5)) * time.Second
 	deadline := time.Now().Add(time.Duration(devResp.ExpiresIn) * time.Second)
 
 	for time.Now().Before(deadline) {
@@ -89,14 +86,8 @@ func pollDeviceCodeToken(clientID string, devResp *DeviceCodeResponse) (*TokenRe
 			return nil, err
 		}
 
-		if tokenResp.Error != "" {
-			switch tokenResp.Error {
-			case "authorization_pending":
-			case "authorization_declined", "bad_verification_code", "expired_token":
-				return nil, fmt.Errorf("验证失败: %s: %s", tokenResp.Error, tokenResp.ErrorDescription)
-			default:
-				return nil, fmt.Errorf("验证失败: %s: %s", tokenResp.Error, tokenResp.ErrorDescription)
-			}
+		if err := checkTokenResponseError(&tokenResp); err != nil {
+			return nil, err
 		}
 
 		if tokenResp.AccessToken != "" {
@@ -107,6 +98,13 @@ func pollDeviceCodeToken(clientID string, devResp *DeviceCodeResponse) (*TokenRe
 	}
 
 	return nil, fmt.Errorf("设备代码过期或轮询超时")
+}
+
+func checkTokenResponseError(resp *TokenResponse) error {
+	if resp.Error == "" || resp.Error == "authorization_pending" {
+		return nil
+	}
+	return fmt.Errorf("验证失败: %s: %s", resp.Error, resp.ErrorDescription)
 }
 
 // Get Microsoft Token 获取 Microsoft 设备码并轮询获取访问令牌
@@ -217,24 +215,23 @@ type XSTSError struct {
 	Identity string
 }
 
+var xstsErrorMessages = map[int]string{
+	2148916227: "账号已被Xbox封禁",
+	2148916233: "账号未注册Xbox。需通过minecraft.net登录创建",
+	2148916235: "账号所属国家/地区不支持Xbox Live服务",
+	2148916236: "需在Xbox页面完成成人验证（韩国）",
+	2148916237: "需在Xbox页面完成成人验证（韩国）",
+	2148916238: "未成年账户（未满18岁），必须由成人账户添加到家庭组才能继续",
+	2148916262: "未知错误（很少）",
+}
+
 func (e *XSTSError) Error() string {
 	msg := fmt.Sprintf("XSTS错误 (XErr: %d)", e.XErr)
 	if e.Message != "" {
 		msg += ": " + e.Message
 	}
-	switch e.XErr {
-	case 2148916227:
-		msg += " - 账号已被Xbox封禁"
-	case 2148916233:
-		msg += " - 账号未注册Xbox。需通过minecraft.net登录创建"
-	case 2148916235:
-		msg += " - 账号所属国家/地区不支持Xbox Live服务"
-	case 2148916236, 2148916237:
-		msg += " - 需在Xbox页面完成成人验证（韩国）"
-	case 2148916238:
-		msg += " - 未成年账户（未满18岁），必须由成人账户添加到家庭组才能继续"
-	case 2148916262:
-		msg += " - 未知错误（很少）"
+	if detail, ok := xstsErrorMessages[e.XErr]; ok {
+		msg += " - " + detail
 	}
 	if e.Redirect != "" {
 		msg += fmt.Sprintf(" (Redirect: %s)", e.Redirect)

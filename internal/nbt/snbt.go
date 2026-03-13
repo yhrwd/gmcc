@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -291,54 +292,41 @@ func (p *snbtParser) parseUnquoted() (any, error) {
 }
 
 func (p *snbtParser) parseNumber(s string, suffix byte) (any, error) {
-	// Remove underscore separators
 	s = strings.ReplaceAll(s, "_", "")
 
 	switch suffix {
 	case 'b', 'B':
-		v, err := strconv.ParseInt(s, 10, 8)
-		if err != nil {
-			return nil, err
-		}
-		return int8(v), nil
+		return parseInteger[int8](s, 8)
 	case 's', 'S':
-		v, err := strconv.ParseInt(s, 10, 16)
-		if err != nil {
-			return nil, err
-		}
-		return int16(v), nil
+		return parseInteger[int16](s, 16)
 	case 'l', 'L':
-		v, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		return v, nil
+		return parseInteger[int64](s, 64)
 	case 'f', 'F':
-		v, err := strconv.ParseFloat(s, 32)
-		if err != nil {
-			return nil, err
-		}
-		return float32(v), nil
+		return parseFloat[float32](s, 32)
 	case 'd', 'D':
-		v, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return nil, err
-		}
-		return v, nil
+		return parseFloat[float64](s, 64)
 	default:
-		// Try int first
 		if v, err := strconv.ParseInt(s, 10, 64); err == nil {
-			if v >= int64(-2147483648) && v <= int64(2147483647) {
+			if v >= math.MinInt32 && v <= math.MaxInt32 {
 				return int32(v), nil
 			}
 			return v, nil
 		}
-		// Try float
 		if v, err := strconv.ParseFloat(s, 64); err == nil {
 			return v, nil
 		}
 		return nil, fmt.Errorf("invalid number: %s", s)
 	}
+}
+
+func parseInteger[T int8 | int16 | int64](s string, bits int) (T, error) {
+	v, err := strconv.ParseInt(s, 10, bits)
+	return T(v), err
+}
+
+func parseFloat[T float32 | float64](s string, bits int) (T, error) {
+	v, err := strconv.ParseFloat(s, bits)
+	return T(v), err
 }
 
 func (p *snbtParser) convertArrayType(value any, listType byte) (any, error) {
@@ -438,41 +426,29 @@ func escapeString(s string) string {
 }
 
 func formatByteArray(b []byte) string {
-	var buf bytes.Buffer
-	buf.WriteString("[B;")
-	for i, v := range b {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		buf.WriteString(fmt.Sprintf("%db", int8(v)))
-	}
-	buf.WriteString("]")
-	return buf.String()
+	return formatArray(b, 'B', func(v byte) string { return fmt.Sprintf("%db", int8(v)) })
 }
 
 func formatIntArray(arr []int32) string {
-	var buf bytes.Buffer
-	buf.WriteString("[I;")
-	for i, v := range arr {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		buf.WriteString(fmt.Sprintf("%d", v))
-	}
-	buf.WriteString("]")
-	return buf.String()
+	return formatArray(arr, 'I', func(v int32) string { return fmt.Sprintf("%d", v) })
 }
 
 func formatLongArray(arr []int64) string {
+	return formatArray(arr, 'L', func(v int64) string { return fmt.Sprintf("%dL", v) })
+}
+
+func formatArray[T any](arr []T, prefix byte, formatFunc func(T) string) string {
 	var buf bytes.Buffer
-	buf.WriteString("[L;")
+	buf.WriteByte('[')
+	buf.WriteByte(prefix)
+	buf.WriteByte(';')
 	for i, v := range arr {
 		if i > 0 {
 			buf.WriteByte(',')
 		}
-		buf.WriteString(fmt.Sprintf("%dL", v))
+		buf.WriteString(formatFunc(v))
 	}
-	buf.WriteString("]")
+	buf.WriteByte(']')
 	return buf.String()
 }
 

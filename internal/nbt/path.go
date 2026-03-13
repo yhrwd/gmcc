@@ -8,19 +8,21 @@ import (
 	"unicode"
 )
 
+type PathNodeType int
+
 // PathNode types
 const (
-	PathNodeRoot        = iota // {tags} - root compound
-	PathNodeChild              // name - child tag
-	PathNodeCompound           // name{tags} - compound child
-	PathNodeAllElements        // [] - all list elements
-	PathNodeIndex              // [index] - specific list element
-	PathNodeFilter             // [{tags}] - filtered list elements
+	PathNodeRoot        PathNodeType = iota // {tags} - root compound
+	PathNodeChild                           // name - child tag
+	PathNodeCompound                        // name{tags} - compound child
+	PathNodeAllElements                     // [] - all list elements
+	PathNodeIndex                           // [index] - specific list element
+	PathNodeFilter                          // [{tags}] - filtered list elements
 )
 
 // PathNode represents a single node in an NBT path
 type PathNode struct {
-	Type    int
+	Type    PathNodeType
 	Name    string         // for child, compound
 	Index   int            // for index node
 	Pattern map[string]any // for root, compound, filter
@@ -438,22 +440,20 @@ func quoteName(name string) string {
 }
 
 func executeNode(node PathNode, data any) ([]any, error) {
-	switch node.Type {
-	case PathNodeRoot:
-		return executeRoot(node, data)
-	case PathNodeChild:
-		return executeChild(node, data)
-	case PathNodeCompound:
-		return executeCompound(node, data)
-	case PathNodeAllElements:
-		return executeAllElements(node, data)
-	case PathNodeIndex:
-		return executeIndex(node, data)
-	case PathNodeFilter:
-		return executeFilter(node, data)
-	default:
-		return nil, fmt.Errorf("Unknown path node type: %d", node.Type)
+	type nodeExecutor func(PathNode, any) ([]any, error)
+	executors := map[PathNodeType]nodeExecutor{
+		PathNodeRoot:        executeRoot,
+		PathNodeChild:       executeChild,
+		PathNodeCompound:    executeCompound,
+		PathNodeAllElements: executeAllElements,
+		PathNodeIndex:       executeIndex,
+		PathNodeFilter:      executeFilter,
 	}
+
+	if executor, ok := executors[node.Type]; ok {
+		return executor(node, data)
+	}
+	return nil, fmt.Errorf("Unknown path node type: %d", node.Type)
 }
 
 func executeRoot(node PathNode, data any) ([]any, error) {

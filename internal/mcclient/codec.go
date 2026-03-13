@@ -68,129 +68,117 @@ func (c *packetConn) EnableEncryption(secret []byte) error {
 }
 
 func (c *packetConn) ReadPacket() (packet, error) {
+	frame, err := c.readFrame()
+	if err != nil {
+		return packet{}, err
+	}
+
+	data, err := c.decompressFrame(frame)
+	if err != nil {
+		return packet{}, err
+	}
+
+	return parsePacketData(data)
+}
+
+func (c *packetConn) readFrame() ([]byte, error) {
 	frameLen, err := readVarInt(c.br)
 	if err != nil {
 		logx.Debugf("读取 frame 长度失败: %v", err)
-		return packet{}, err
+		return nil, err
 	}
-	if frameLen < 0 {
-		return packet{}, fmt.Errorf("invalid frame length %d", frameLen)
-	}
-	if frameLen > maxFrameLength {
-		return packet{}, fmt.Errorf("invalid frame length %d > %d (可能是加密/压缩流失步)", frameLen, maxFrameLength)
+	if frameLen < 0 || frameLen > maxFrameLength {
+		return nil, fmt.Errorf("invalid frame length %d", frameLen)
 	}
 
 	frame := make([]byte, frameLen)
 	if _, err := io.ReadFull(c.br, frame); err != nil {
 		logx.Debugf("读取 frame 内容失败: frameLen=%d err=%v", frameLen, err)
-		return packet{}, err
+		return nil, err
+	}
+	return frame, nil
+}
+
+func (c *packetConn) decompressFrame(frame []byte) ([]byte, error) {
+	if c.compressionThreshold < 0 {
+		logx.PacketLogf("收包 frame: frameLen=%d compressed=false threshold=%d uncompressedLen=%d framePreview=%s",
+			len(frame), c.compressionThreshold, len(frame), rawPreview(frame))
+		return frame, nil
 	}
 
-	data := frame
-	if c.compressionThreshold >= 0 {
-		r := bytes.NewReader(frame)
-		uncompressedLen, err := readVarInt(r)
-		if err != nil {
-			return packet{}, fmt.Errorf("read compressed length failed: %w", err)
-		}
-		rest, err := io.ReadAll(r)
-		if err != nil {
-			return packet{}, err
-		}
-
-		if uncompressedLen == 0 {
-			data = rest
-		} else {
-			zr, err := zlib.NewReader(bytes.NewReader(rest))
-			if err != nil {
-				return packet{}, fmt.Errorf("create zlib reader failed: %w", err)
-			}
-			uncompressed, err := io.ReadAll(zr)
-			_ = zr.Close()
-			if err != nil {
-				return packet{}, fmt.Errorf("decompress packet failed: %w", err)
-			}
-			if len(uncompressed) != int(uncompressedLen) {
-				return packet{}, fmt.Errorf("invalid decompressed size: want %d got %d", uncompressedLen, len(uncompressed))
-			}
-			data = uncompressed
-		}
-
-		logx.PacketLogf(
-			"收包 frame: frameLen=%d compressed=%t threshold=%d uncompressedLen=%d framePreview=%s",
-			frameLen,
-			uncompressedLen != 0,
-			c.compressionThreshold,
-			len(data),
-			rawPreview(frame),
-		)
+	r := bytes.NewReader(frame)
+	uncompressedLen, err := readVarInt(r)
+	if err != nil {
+		return nil, fmt.Errorf("read compressed length failed: %w", err)
 	}
 
+	rest, _ := io.ReadAll(r)
+	var data []byte
+
+	if uncompressedLen == 0 {
+		data = rest
+	} else {
+		zr, err := zlib.NewReader(bytes.NewReader(rest))
+		if err != nil {
+			return nil, fmt.Errorf("create zlib reader failed: %w", err)
+		}
+		data, err = io.ReadAll(zr)
+		_ = zr.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decompress packet failed: %w", err)
+		}
+		if len(data) != int(uncompressedLen) {
+			return nil, fmt.Errorf("invalid decompressed size: want %d got %d", uncompressedLen, len(data))
+		}
+	}
+
+	logx.PacketLogf("收包 frame: frameLen=%d compressed=%t threshold=%d uncompressedLen=%d framePreview=%s",
+		len(frame), uncompressedLen != 0, c.compressionThreshold, len(data), rawPreview(frame))
+	return data, nil
+}
+
+func parsePacketData(data []byte) (packet, error) {
 	r := bytes.NewReader(data)
 	packetID, err := readVarInt(r)
 	if err != nil {
 		return packet{}, fmt.Errorf("read packet id failed: %w", err)
 	}
-	payload, err := io.ReadAll(r)
-	if err != nil {
-		return packet{}, err
-	}
-
-	if c.compressionThreshold < 0 {
-		logx.PacketLogf(
-			"收包 frame: frameLen=%d compressed=false threshold=%d uncompressedLen=%d framePreview=%s",
-			frameLen,
-			c.compressionThreshold,
-			len(data),
-			rawPreview(frame),
-		)
-	}
-
+	payload, _ := io.ReadAll(r)
 	return packet{ID: packetID, Data: payload}, nil
 }
 
 func (c *packetConn) WritePacket(packetID int32, payload []byte) error {
 	body := append(encodeVarInt(packetID), payload...)
+	frame := c.compressBody(body)
+	return c.writeFrame(packetID, payload, body, frame)
+}
 
-	var frame []byte
-	if c.compressionThreshold >= 0 {
-		if len(body) >= c.compressionThreshold {
-			var compressed bytes.Buffer
-			zw := zlib.NewWriter(&compressed)
-			if _, err := zw.Write(body); err != nil {
-				_ = zw.Close()
-				return err
-			}
-			if err := zw.Close(); err != nil {
-				return err
-			}
-			frame = append(encodeVarInt(int32(len(body))), compressed.Bytes()...)
-		} else {
-			frame = append(encodeVarInt(0), body...)
-		}
-	} else {
-		frame = body
+func (c *packetConn) compressBody(body []byte) []byte {
+	if c.compressionThreshold < 0 {
+		return body
 	}
 
+	if len(body) >= c.compressionThreshold {
+		var compressed bytes.Buffer
+		zw := zlib.NewWriter(&compressed)
+		_, _ = zw.Write(body)
+		_ = zw.Close()
+		return append(encodeVarInt(int32(len(body))), compressed.Bytes()...)
+	}
+	return append(encodeVarInt(0), body...)
+}
+
+func (c *packetConn) writeFrame(packetID int32, payload, body, frame []byte) error {
 	raw := append(encodeVarInt(int32(len(frame))), frame...)
 
-	logx.PacketLogf(
-		"发包: id=0x%02X payloadLen=%d bodyLen=%d frameLen=%d compressed=%t threshold=%d payloadPreview=%s",
-		packetID,
-		len(payload),
-		len(body),
-		len(frame),
+	logx.PacketLogf("发包: id=0x%02X payloadLen=%d bodyLen=%d frameLen=%d compressed=%t threshold=%d payloadPreview=%s",
+		packetID, len(payload), len(body), len(frame),
 		c.compressionThreshold >= 0 && len(body) >= c.compressionThreshold,
-		c.compressionThreshold,
-		rawPreview(payload),
-	)
+		c.compressionThreshold, rawPreview(payload))
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, err := c.w.Write(raw)
-	if err != nil {
-		logx.PacketLogf("发包失败: id=0x%02X err=%v", packetID, err)
-	}
 	return err
 }
 

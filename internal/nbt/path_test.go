@@ -8,7 +8,7 @@ func TestParsePath_Simple(t *testing.T) {
 	tests := []struct {
 		path     string
 		wantErr  bool
-		nodeType int
+		nodeType PathNodeType
 	}{
 		{"foo", false, PathNodeChild},
 		{"foo.bar", false, PathNodeChild},

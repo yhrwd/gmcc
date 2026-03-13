@@ -87,75 +87,115 @@ func (d *Decoder) unmarshal(val reflect.Value, tagType byte) error {
 	case TagEnd:
 		return ErrEND
 	case TagByte:
-		v, err := d.readInt8()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalByte(val)
 	case TagShort:
-		v, err := d.readInt16()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalShort(val)
 	case TagInt:
-		v, err := d.readInt32()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalInt(val)
 	case TagLong:
-		v, err := d.readInt64()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalLong(val)
 	case TagFloat:
-		v, err := d.readInt32()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, math.Float32frombits(uint32(v)))
+		return d.unmarshalFloat(val)
 	case TagDouble:
-		v, err := d.readInt64()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, math.Float64frombits(uint64(v)))
+		return d.unmarshalDouble(val)
 	case TagByteArray:
-		v, err := d.readByteArray()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalByteArray(val)
 	case TagString:
-		v, err := d.readString()
-		if err != nil {
-			return err
-		}
-		if t != nil {
-			return t.UnmarshalText([]byte(v))
-		}
-		return d.setValue(val, v)
+		return d.unmarshalString(val, t)
 	case TagList:
 		return d.readList(val)
 	case TagCompound:
 		return d.readCompound(val)
 	case TagIntArray:
-		v, err := d.readIntArray()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalIntArray(val)
 	case TagLongArray:
-		v, err := d.readLongArray()
-		if err != nil {
-			return err
-		}
-		return d.setValue(val, v)
+		return d.unmarshalLongArray(val)
 	default:
 		return d.errorf("unknown tag type: 0x%02X", tagType)
 	}
+}
+
+func (d *Decoder) unmarshalByte(val reflect.Value) error {
+	v, err := d.readInt8()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalShort(val reflect.Value) error {
+	v, err := d.readInt16()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalInt(val reflect.Value) error {
+	v, err := d.readInt32()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalLong(val reflect.Value) error {
+	v, err := d.readInt64()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalFloat(val reflect.Value) error {
+	v, err := d.readInt32()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, math.Float32frombits(uint32(v)))
+}
+
+func (d *Decoder) unmarshalDouble(val reflect.Value) error {
+	v, err := d.readInt64()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, math.Float64frombits(uint64(v)))
+}
+
+func (d *Decoder) unmarshalByteArray(val reflect.Value) error {
+	v, err := d.readByteArray()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalString(val reflect.Value, t encoding.TextUnmarshaler) error {
+	v, err := d.readString()
+	if err != nil {
+		return err
+	}
+	if t != nil {
+		return t.UnmarshalText([]byte(v))
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalIntArray(val reflect.Value) error {
+	v, err := d.readIntArray()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
+}
+
+func (d *Decoder) unmarshalLongArray(val reflect.Value) error {
+	v, err := d.readLongArray()
+	if err != nil {
+		return err
+	}
+	return d.setValue(val, v)
 }
 
 func (d *Decoder) setValue(val reflect.Value, v any) error {
@@ -649,6 +689,7 @@ func indirect(v reflect.Value, decodingNull bool) (Unmarshaler, encoding.TextUnm
 	}
 
 	for {
+		// Load value from interface, but only if it's not nil.
 		if v.Kind() == reflect.Interface && !v.IsNil() {
 			e := v.Elem()
 			if e.Kind() == reflect.Ptr && !e.IsNil() && (!decodingNull || e.Elem().Kind() == reflect.Ptr) {
@@ -662,15 +703,20 @@ func indirect(v reflect.Value, decodingNull bool) (Unmarshaler, encoding.TextUnm
 				continue
 			}
 		}
+
 		if v.Kind() != reflect.Ptr {
 			break
 		}
+
 		if decodingNull && v.CanSet() {
 			break
 		}
+
 		if v.IsNil() {
 			v.Set(reflect.New(v.Type().Elem()))
 		}
+
+		// Check if the value implements Unmarshaler or TextUnmarshaler.
 		if v.Type().NumMethod() > 0 && v.CanInterface() {
 			if u, ok := v.Interface().(Unmarshaler); ok {
 				return u, nil, reflect.Value{}, assign
@@ -679,6 +725,7 @@ func indirect(v reflect.Value, decodingNull bool) (Unmarshaler, encoding.TextUnm
 				return nil, u, v, assign
 			}
 		}
+
 		if haveAddr {
 			v = v0
 			haveAddr = false

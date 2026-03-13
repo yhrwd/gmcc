@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math"
 	"math/big"
 	"net"
@@ -117,14 +116,6 @@ func rawPreview(b []byte) string {
 		return hex.EncodeToString(b)
 	}
 	return hex.EncodeToString(b[:max]) + "..."
-}
-
-func readU8(r io.Reader) (byte, error) {
-	var b [1]byte
-	if _, err := io.ReadFull(r, b[:]); err != nil {
-		return 0, err
-	}
-	return b[0], nil
 }
 
 func readFloat32FromBytes(b []byte) float32 {

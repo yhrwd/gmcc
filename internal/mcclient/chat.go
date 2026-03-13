@@ -19,6 +19,7 @@ import (
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/logx"
 	"gmcc/internal/nbt"
+	"gmcc/internal/player"
 )
 
 // ChatMessage 是统一的聊天事件结构，方便后续接入机器人/插件解析。
@@ -178,12 +179,29 @@ func (c *Client) syncPlayerInfo() {
 	time.Sleep(5 * time.Second)
 
 	info := c.Player.GetInfo()
+	c.logPlayerInfo(info)
+
+	inventory := c.Player.Inventory.GetAll()
+	c.logInventory(inventory)
+}
+
+func (c *Client) logPlayerInfo(info map[string]any) {
 	logx.Infof("=== 玩家信息同步 ===")
-	logx.Infof("名称: %v", info["name"])
-	logx.Infof("UUID: %v", info["uuid"])
-	logx.Infof("实体ID: %v", info["entity_id"])
-	logx.Infof("游戏模式: %v", info["gamemode"])
-	logx.Infof("维度: %v", info["dimension"])
+	fields := []struct {
+		key   string
+		label string
+	}{
+		{"name", "名称"},
+		{"uuid", "UUID"},
+		{"entity_id", "实体ID"},
+		{"gamemode", "游戏模式"},
+		{"dimension", "维度"},
+	}
+
+	for _, f := range fields {
+		logx.Infof("%s: %v", f.label, info[f.key])
+	}
+
 	pos := info["position"].([]float64)
 	rot := info["rotation"].([]float32)
 	logx.Infof("位置: X=%.2f, Y=%.2f, Z=%.2f", pos[0], pos[1], pos[2])
@@ -196,8 +214,9 @@ func (c *Client) syncPlayerInfo() {
 	logx.Infof("手持槽位: %d", info["held_slot"])
 	logx.Infof("飞行中: %v, 可飞行: %v", info["flying"], info["can_fly"])
 	logx.Infof("在线时长: %v", info["duration"])
+}
 
-	inventory := c.Player.Inventory.GetAll()
+func (c *Client) logInventory(inventory map[int8]*player.Item) {
 	logx.Infof("=== 背包内容 ===")
 	if len(inventory) == 0 {
 		logx.Infof("背包为空（等待3秒后重试...）")
@@ -205,28 +224,20 @@ func (c *Client) syncPlayerInfo() {
 		inventory = c.Player.Inventory.GetAll()
 		if len(inventory) == 0 {
 			logx.Infof("背包确实为空")
-		} else {
-			for slot, item := range inventory {
-				if item != nil {
-					logx.Infof("槽位 %d: %s x%d", slot, item.ID, item.Count)
-				}
-			}
+			return
 		}
-	} else {
-		for slot, item := range inventory {
-			if item != nil {
-				logx.Infof("槽位 %d: %s x%d", slot, item.ID, item.Count)
-			}
+	}
+
+	for slot, item := range inventory {
+		if item != nil {
+			logx.Infof("槽位 %d: %s x%d", slot, item.ID, item.Count)
 		}
 	}
 	logx.Infof("==================")
 }
 
 func (c *Client) initSecureChatSession() error {
-	if c.chatSessionOK {
-		return nil
-	}
-	if c.online == nil || strings.TrimSpace(c.online.AccessToken) == "" {
+	if c.chatSessionOK || c.online == nil || strings.TrimSpace(c.online.AccessToken) == "" {
 		return nil
 	}
 
@@ -235,58 +246,80 @@ func (c *Client) initSecureChatSession() error {
 		return err
 	}
 
-	privateKey, err := parsePrivateKeyPEM(cert.KeyPair.PrivateKey)
+	session, err := c.createSecureChatSession(cert)
 	if err != nil {
-		return fmt.Errorf("解析证书 private key 失败: %w", err)
+		return err
 	}
 
+	if err := c.sendChatSessionUpdate(session, cert); err != nil {
+		return err
+	}
+
+	c.chatSignMu.Lock()
+	c.chatSession = session
+	c.chatSignMu.Unlock()
+
+	c.chatSessionOK = true
+	logx.Infof("已启用 secure chat 公钥会话 (sessionID=%x)", session.sessionID[:4])
+	return nil
+}
+
+func (c *Client) createSecureChatSession(cert *mcauth.PlayerCertificatesResponse) (*secureChatSession, error) {
+	privateKey, err := parsePrivateKeyPEM(cert.KeyPair.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("解析证书 private key 失败: %w", err)
+	}
+
+	sessionID, err := randomUUIDv4()
+	if err != nil {
+		return nil, err
+	}
+
+	return &secureChatSession{
+		sessionID:    sessionID,
+		privateKey:   privateKey,
+		messageIndex: 0,
+	}, nil
+}
+
+func (c *Client) sendChatSessionUpdate(session *secureChatSession, cert *mcauth.PlayerCertificatesResponse) error {
 	pubDER, err := parsePublicKeyPEMToSPKIDER(cert.KeyPair.PublicKey)
 	if err != nil {
 		return fmt.Errorf("解析证书 public key 失败: %w", err)
 	}
 
-	sigB64 := strings.TrimSpace(cert.PublicKeySignatureV2)
-	if sigB64 == "" {
-		sigB64 = strings.TrimSpace(cert.PublicKeySignature)
-	}
-	if sigB64 == "" {
-		return fmt.Errorf("证书缺少 public key signature")
-	}
-	sig, err := base64.StdEncoding.DecodeString(sigB64)
-	if err != nil {
-		return fmt.Errorf("解析 public key signature 失败: %w", err)
-	}
-
-	sessionID, err := randomUUIDv4()
+	sig, err := decodeCertificateSignature(cert)
 	if err != nil {
 		return err
 	}
+
 	expireMillis := cert.ExpiresAt.UnixMilli()
 	if cert.ExpiresAt.IsZero() {
 		expireMillis = time.Now().Add(2 * time.Hour).UnixMilli()
 	}
 
 	payload := make([]byte, 0, len(pubDER)+len(sig)+64)
-	payload = append(payload, sessionID[:]...)
+	payload = append(payload, session.sessionID[:]...)
 	payload = append(payload, encodeInt64(expireMillis)...)
 	payload = append(payload, encodeByteArray(pubDER)...)
 	payload = append(payload, encodeByteArray(sig)...)
 
-	if err := c.conn.WritePacket(playServerChatSession, payload); err != nil {
-		return fmt.Errorf("发送 chat_session_update 失败: %w", err)
-	}
+	return c.conn.WritePacket(playServerChatSession, payload)
+}
 
-	c.chatSignMu.Lock()
-	c.chatSession = &secureChatSession{
-		sessionID:    sessionID,
-		privateKey:   privateKey,
-		messageIndex: 0,
+func decodeCertificateSignature(cert *mcauth.PlayerCertificatesResponse) ([]byte, error) {
+	sigB64 := strings.TrimSpace(cert.PublicKeySignatureV2)
+	if sigB64 == "" {
+		sigB64 = strings.TrimSpace(cert.PublicKeySignature)
 	}
-	c.chatSignMu.Unlock()
-
-	c.chatSessionOK = true
-	logx.Infof("已发送 chat_session_update，启用 secure chat 公钥会话")
-	return nil
+	if sigB64 == "" {
+		return nil, fmt.Errorf("证书缺少 public key signature")
+	}
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		return nil, fmt.Errorf("解析 public key signature 失败: %w", err)
+	}
+	return sig, nil
 }
 
 func (c *Client) emitChat(chat ChatMessage) {
