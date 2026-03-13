@@ -1,4 +1,4 @@
-package mcclient
+package packet
 
 import (
 	"bufio"
@@ -14,100 +14,101 @@ import (
 	"time"
 
 	"gmcc/internal/logx"
+	"gmcc/internal/mcclient/crypto"
 	"gmcc/internal/nbt"
 )
 
-type packet struct {
+type Packet struct {
 	ID   int32
 	Data []byte
 }
 
-const maxFrameLength = 2 * 1024 * 1024
+const MaxFrameLength = 2 * 1024 * 1024
 
-type packetConn struct {
-	conn net.Conn
-	br   *bufio.Reader
-	w    io.Writer
+type PacketConn struct {
+	Conn net.Conn
+	Br   *bufio.Reader
+	W    io.Writer
 
-	mu                   sync.Mutex
-	compressionThreshold int
+	Mu                   sync.Mutex
+	CompressionThreshold int
 }
 
-func newPacketConn(conn net.Conn) *packetConn {
-	return &packetConn{
-		conn:                 conn,
-		br:                   bufio.NewReader(conn),
-		w:                    conn,
-		compressionThreshold: -1,
+func NewPacketConn(conn net.Conn) *PacketConn {
+	return &PacketConn{
+		Conn:                 conn,
+		Br:                   bufio.NewReader(conn),
+		W:                    conn,
+		CompressionThreshold: -1,
 	}
 }
 
-func (c *packetConn) Close() error {
-	return c.conn.Close()
+func (c *PacketConn) Close() error {
+	return c.Conn.Close()
 }
 
-func (c *packetConn) SetReadDeadline(t time.Time) error {
-	return c.conn.SetReadDeadline(t)
+func (c *PacketConn) SetReadDeadline(t time.Time) error {
+	return c.Conn.SetReadDeadline(t)
 }
 
-func (c *packetConn) SetCompressionThreshold(threshold int) {
-	c.compressionThreshold = threshold
+func (c *PacketConn) SetCompressionThreshold(threshold int) {
+	c.CompressionThreshold = threshold
 }
 
-func (c *packetConn) EnableEncryption(secret []byte) error {
+func (c *PacketConn) EnableEncryption(secret []byte) error {
 	block, err := aes.NewCipher(secret)
 	if err != nil {
 		return fmt.Errorf("create AES cipher failed: %w", err)
 	}
-	decrypter := newCFB8(block, secret, false)
-	encrypter := newCFB8(block, secret, true)
-	c.br = bufio.NewReader(&cipher.StreamReader{S: decrypter, R: c.conn})
-	c.w = &cipher.StreamWriter{S: encrypter, W: c.conn}
+	decrypter := crypto.NewCFB8(block, secret, false)
+	encrypter := crypto.NewCFB8(block, secret, true)
+	c.Br = bufio.NewReader(&cipher.StreamReader{S: decrypter, R: c.Conn})
+	c.W = &cipher.StreamWriter{S: encrypter, W: c.Conn}
 	logx.Debugf("已启用连接加密: mode=AES/CFB8 secretLen=%d", len(secret))
 	return nil
 }
 
-func (c *packetConn) ReadPacket() (packet, error) {
+func (c *PacketConn) ReadPacket() (Packet, error) {
 	frame, err := c.readFrame()
 	if err != nil {
-		return packet{}, err
+		return Packet{}, err
 	}
 
 	data, err := c.decompressFrame(frame)
 	if err != nil {
-		return packet{}, err
+		return Packet{}, err
 	}
 
-	return parsePacketData(data)
+	return ParsePacketData(data)
 }
 
-func (c *packetConn) readFrame() ([]byte, error) {
-	frameLen, err := readVarInt(c.br)
+func (c *PacketConn) readFrame() ([]byte, error) {
+	frameLen, err := ReadVarInt(c.Br)
 	if err != nil {
 		logx.Debugf("读取 frame 长度失败: %v", err)
 		return nil, err
 	}
-	if frameLen < 0 || frameLen > maxFrameLength {
+	if frameLen < 0 || frameLen > MaxFrameLength {
 		return nil, fmt.Errorf("invalid frame length %d", frameLen)
 	}
 
 	frame := make([]byte, frameLen)
-	if _, err := io.ReadFull(c.br, frame); err != nil {
+	if _, err := io.ReadFull(c.Br, frame); err != nil {
 		logx.Debugf("读取 frame 内容失败: frameLen=%d err=%v", frameLen, err)
 		return nil, err
 	}
 	return frame, nil
 }
 
-func (c *packetConn) decompressFrame(frame []byte) ([]byte, error) {
-	if c.compressionThreshold < 0 {
+func (c *PacketConn) decompressFrame(frame []byte) ([]byte, error) {
+	if c.CompressionThreshold < 0 {
 		logx.PacketLogf("收包 frame: frameLen=%d compressed=false threshold=%d uncompressedLen=%d framePreview=%s",
-			len(frame), c.compressionThreshold, len(frame), rawPreview(frame))
+			len(frame), c.CompressionThreshold, len(frame), RawPreview(frame))
 		return frame, nil
 	}
 
 	r := bytes.NewReader(frame)
-	uncompressedLen, err := readVarInt(r)
+	uncompressedLen, err := ReadVarInt(r)
 	if err != nil {
 		return nil, fmt.Errorf("read compressed length failed: %w", err)
 	}
@@ -133,56 +134,56 @@ func (c *packetConn) decompressFrame(frame []byte) ([]byte, error) {
 	}
 
 	logx.PacketLogf("收包 frame: frameLen=%d compressed=%t threshold=%d uncompressedLen=%d framePreview=%s",
-		len(frame), uncompressedLen != 0, c.compressionThreshold, len(data), rawPreview(frame))
+		len(frame), uncompressedLen != 0, c.CompressionThreshold, len(data), RawPreview(frame))
 	return data, nil
 }
 
-func parsePacketData(data []byte) (packet, error) {
+func ParsePacketData(data []byte) (Packet, error) {
 	r := bytes.NewReader(data)
-	packetID, err := readVarInt(r)
+	packetID, err := ReadVarInt(r)
 	if err != nil {
-		return packet{}, fmt.Errorf("read packet id failed: %w", err)
+		return Packet{}, fmt.Errorf("read packet id failed: %w", err)
 	}
 	payload, _ := io.ReadAll(r)
-	return packet{ID: packetID, Data: payload}, nil
+	return Packet{ID: packetID, Data: payload}, nil
 }
 
-func (c *packetConn) WritePacket(packetID int32, payload []byte) error {
-	body := append(encodeVarInt(packetID), payload...)
+func (c *PacketConn) WritePacket(packetID int32, payload []byte) error {
+	body := append(EncodeVarInt(packetID), payload...)
 	frame := c.compressBody(body)
 	return c.writeFrame(packetID, payload, body, frame)
 }
 
-func (c *packetConn) compressBody(body []byte) []byte {
-	if c.compressionThreshold < 0 {
+func (c *PacketConn) compressBody(body []byte) []byte {
+	if c.CompressionThreshold < 0 {
 		return body
 	}
 
-	if len(body) >= c.compressionThreshold {
+	if len(body) >= c.CompressionThreshold {
 		var compressed bytes.Buffer
 		zw := zlib.NewWriter(&compressed)
 		_, _ = zw.Write(body)
 		_ = zw.Close()
-		return append(encodeVarInt(int32(len(body))), compressed.Bytes()...)
+		return append(EncodeVarInt(int32(len(body))), compressed.Bytes()...)
 	}
-	return append(encodeVarInt(0), body...)
+	return append(EncodeVarInt(0), body...)
 }
 
-func (c *packetConn) writeFrame(packetID int32, payload, body, frame []byte) error {
-	raw := append(encodeVarInt(int32(len(frame))), frame...)
+func (c *PacketConn) writeFrame(packetID int32, payload, body, frame []byte) error {
+	raw := append(EncodeVarInt(int32(len(frame))), frame...)
 
 	logx.PacketLogf("发包: id=0x%02X payloadLen=%d bodyLen=%d frameLen=%d compressed=%t threshold=%d payloadPreview=%s",
 		packetID, len(payload), len(body), len(frame),
-		c.compressionThreshold >= 0 && len(body) >= c.compressionThreshold,
-		c.compressionThreshold, rawPreview(payload))
+		c.CompressionThreshold >= 0 && len(body) >= c.CompressionThreshold,
+		c.CompressionThreshold, RawPreview(payload))
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, err := c.w.Write(raw)
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	_, err := c.W.Write(raw)
 	return err
 }
 
-func readVarInt(r io.ByteReader) (int32, error) {
+func ReadVarInt(r io.ByteReader) (int32, error) {
 	var result int32
 	var shift uint
 	for i := 0; i < 5; i++ {
@@ -199,7 +200,7 @@ func readVarInt(r io.ByteReader) (int32, error) {
 	return 0, fmt.Errorf("varint too large")
 }
 
-func encodeVarInt(v int32) []byte {
+func EncodeVarInt(v int32) []byte {
 	x := uint32(v)
 	out := make([]byte, 0, 5)
 	for {
@@ -212,7 +213,7 @@ func encodeVarInt(v int32) []byte {
 	}
 }
 
-func readBool(r io.Reader) (bool, error) {
+func ReadBool(r io.Reader) (bool, error) {
 	var b [1]byte
 	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return false, err
@@ -220,15 +221,15 @@ func readBool(r io.Reader) (bool, error) {
 	return b[0] != 0, nil
 }
 
-func encodeBool(v bool) []byte {
+func EncodeBool(v bool) []byte {
 	if v {
 		return []byte{1}
 	}
 	return []byte{0}
 }
 
-func readString(r io.ByteReader, rr io.Reader) (string, error) {
-	n, err := readVarInt(r)
+func ReadString(r io.ByteReader, rr io.Reader) (string, error) {
+	n, err := ReadVarInt(r)
 	if err != nil {
 		return "", err
 	}
@@ -242,16 +243,16 @@ func readString(r io.ByteReader, rr io.Reader) (string, error) {
 	return nbt.CESU8ToUTF8(buf), nil
 }
 
-func encodeString(s string) []byte {
+func EncodeString(s string) []byte {
 	b := []byte(s)
 	out := make([]byte, 0, len(b)+5)
-	out = append(out, encodeVarInt(int32(len(b)))...)
+	out = append(out, EncodeVarInt(int32(len(b)))...)
 	out = append(out, b...)
 	return out
 }
 
-func readByteArray(r io.ByteReader, rr io.Reader) ([]byte, error) {
-	n, err := readVarInt(r)
+func ReadByteArray(r io.ByteReader, rr io.Reader) ([]byte, error) {
+	n, err := ReadVarInt(r)
 	if err != nil {
 		return nil, err
 	}
@@ -265,14 +266,14 @@ func readByteArray(r io.ByteReader, rr io.Reader) ([]byte, error) {
 	return buf, nil
 }
 
-func encodeByteArray(b []byte) []byte {
+func EncodeByteArray(b []byte) []byte {
 	out := make([]byte, 0, len(b)+5)
-	out = append(out, encodeVarInt(int32(len(b)))...)
+	out = append(out, EncodeVarInt(int32(len(b)))...)
 	out = append(out, b...)
 	return out
 }
 
-func readInt64(r io.Reader) (int64, error) {
+func ReadInt64(r io.Reader) (int64, error) {
 	var v int64
 	if err := binary.Read(r, binary.BigEndian, &v); err != nil {
 		return 0, err
@@ -280,13 +281,13 @@ func readInt64(r io.Reader) (int64, error) {
 	return v, nil
 }
 
-func encodeInt64(v int64) []byte {
+func EncodeInt64(v int64) []byte {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], uint64(v))
 	return b[:]
 }
 
-func readInt32(r io.Reader) (int32, error) {
+func ReadInt32(r io.Reader) (int32, error) {
 	var v int32
 	if err := binary.Read(r, binary.BigEndian, &v); err != nil {
 		return 0, err
@@ -294,55 +295,19 @@ func readInt32(r io.Reader) (int32, error) {
 	return v, nil
 }
 
-func encodeInt32(v int32) []byte {
+func EncodeInt32(v int32) []byte {
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], uint32(v))
 	return b[:]
 }
 
-func readUUID(r io.Reader) ([16]byte, error) {
+func ReadUUID(r io.Reader) ([16]byte, error) {
 	var id [16]byte
 	_, err := io.ReadFull(r, id[:])
 	return id, err
 }
 
-type cfb8 struct {
-	b        cipher.Block
-	next     []byte
-	tmp      []byte
-	encrypt  bool
-	blockLen int
-}
-
-func newCFB8(block cipher.Block, iv []byte, encrypt bool) cipher.Stream {
-	bs := block.BlockSize()
-	next := make([]byte, bs)
-	copy(next, iv)
-	return &cfb8{
-		b:        block,
-		next:     next,
-		tmp:      make([]byte, bs),
-		encrypt:  encrypt,
-		blockLen: bs,
-	}
-}
-
-func (x *cfb8) XORKeyStream(dst, src []byte) {
-	if len(dst) < len(src) {
-		panic("cfb8 output smaller than input")
-	}
-
-	for i := 0; i < len(src); i++ {
-		in := src[i]
-		x.b.Encrypt(x.tmp, x.next)
-		out := in ^ x.tmp[0]
-		dst[i] = out
-
-		copy(x.next, x.next[1:])
-		if x.encrypt {
-			x.next[x.blockLen-1] = out
-		} else {
-			x.next[x.blockLen-1] = in
-		}
-	}
+func DiscardN(r io.Reader, n int) error {
+	_, err := io.CopyN(io.Discard, r, int64(n))
+	return err
 }

@@ -1,4 +1,4 @@
-package mcclient
+package packet
 
 import (
 	"crypto/md5"
@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-func parseAddress(addr string) (string, uint16, error) {
+func ParseAddress(addr string) (string, uint16, error) {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return "", 0, fmt.Errorf("server.address 不能为空")
@@ -40,14 +40,14 @@ func parseAddress(addr string) (string, uint16, error) {
 	return host, uint16(portInt), nil
 }
 
-func offlineUUID(name string) [16]byte {
+func OfflineUUID(name string) [16]byte {
 	hash := md5.Sum([]byte("OfflinePlayer:" + name))
 	hash[6] = (hash[6] & 0x0F) | 0x30
 	hash[8] = (hash[8] & 0x3F) | 0x80
 	return hash
 }
 
-func parseUUID(raw string) ([16]byte, error) {
+func ParseUUID(raw string) ([16]byte, error) {
 	clean := strings.ReplaceAll(strings.TrimSpace(raw), "-", "")
 	if len(clean) != 32 {
 		return [16]byte{}, fmt.Errorf("uuid 长度无效")
@@ -61,7 +61,7 @@ func parseUUID(raw string) ([16]byte, error) {
 	return id, nil
 }
 
-func formatUUID(id [16]byte) string {
+func FormatUUID(id [16]byte) string {
 	hexStr := hex.EncodeToString(id[:])
 	return fmt.Sprintf("%s-%s-%s-%s-%s",
 		hexStr[0:8],
@@ -72,7 +72,7 @@ func formatUUID(id [16]byte) string {
 	)
 }
 
-func minecraftServerHash(serverID string, sharedSecret []byte, publicKey []byte) string {
+func MinecraftServerHash(serverID string, sharedSecret []byte, publicKey []byte) string {
 	h := sha1.New()
 	_, _ = h.Write([]byte(serverID))
 	_, _ = h.Write(sharedSecret)
@@ -107,7 +107,7 @@ func minecraftServerHash(serverID string, sharedSecret []byte, publicKey []byte)
 	return n.Text(16)
 }
 
-func rawPreview(b []byte) string {
+func RawPreview(b []byte) string {
 	if len(b) == 0 {
 		return "<empty>"
 	}
@@ -118,6 +118,6 @@ func rawPreview(b []byte) string {
 	return hex.EncodeToString(b[:max]) + "..."
 }
 
-func readFloat32FromBytes(b []byte) float32 {
+func ReadFloat32FromBytes(b []byte) float32 {
 	return math.Float32frombits(binary.BigEndian.Uint32(b))
 }

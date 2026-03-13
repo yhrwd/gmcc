@@ -4,6 +4,8 @@ import (
 	"crypto/aes"
 	"crypto/rand"
 	"testing"
+
+	"gmcc/internal/mcclient/crypto"
 )
 
 func TestCFB8RoundTripInPlace(t *testing.T) {
@@ -20,10 +22,10 @@ func TestCFB8RoundTripInPlace(t *testing.T) {
 	ciphertext := make([]byte, len(plain))
 	copy(ciphertext, plain)
 
-	enc := newCFB8(block, key, true)
+	enc := crypto.NewCFB8(block, key, true)
 	enc.XORKeyStream(ciphertext, ciphertext)
 
-	dec := newCFB8(block, key, false)
+	dec := crypto.NewCFB8(block, key, false)
 	dec.XORKeyStream(ciphertext, ciphertext)
 
 	if string(ciphertext) != string(plain) {

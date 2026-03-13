@@ -1,4 +1,4 @@
-package mcclient
+package chat
 
 import (
 	"encoding/json"
@@ -8,8 +8,8 @@ import (
 	"gmcc/internal/logx"
 )
 
-// extractPlainTextFromChatJSON 从Minecraft聊天JSON中提取纯文本。
-func extractPlainTextFromChatJSON(rawJSON string) string {
+// ExtractPlainTextFromChatJSON 从Minecraft聊天JSON中提取纯文本。
+func ExtractPlainTextFromChatJSON(rawJSON string) string {
 	if strings.TrimSpace(rawJSON) == "" {
 		return ""
 	}
@@ -20,17 +20,15 @@ func extractPlainTextFromChatJSON(rawJSON string) string {
 		return rawJSON
 	}
 
-	// NBT解码器已经处理了CESU-8，无需再次处理
-
 	var parts []string
-	collectChatText(node, &parts)
+	CollectChatText(node, &parts)
 	text := strings.TrimSpace(strings.Join(parts, ""))
-	text = removeColorCodes(text)
+	text = RemoveColorCodes(text)
 	return text
 }
 
-// collectChatText 递归收集聊天JSON中的文本内容。
-func collectChatText(node any, parts *[]string) {
+// CollectChatText 递归收集聊天JSON中的文本内容。
+func CollectChatText(node any, parts *[]string) {
 	switch v := node.(type) {
 	case string:
 		if strings.TrimSpace(v) != "" {
@@ -62,37 +60,43 @@ func collectChatText(node any, parts *[]string) {
 		}
 		if score, ok := v["score"].(map[string]any); ok {
 			if val, ok := score["value"]; ok {
-				collectChatText(val, parts)
+				CollectChatText(val, parts)
 			} else if name, ok := score["name"]; ok {
-				collectChatText(name, parts)
+				CollectChatText(name, parts)
 			}
 		}
 		if with, ok := v["with"].([]any); ok {
 			for _, item := range with {
-				collectChatText(item, parts)
+				CollectChatText(item, parts)
 			}
 		}
 		if extra, ok := v["extra"].([]any); ok {
 			for _, item := range extra {
-				collectChatText(item, parts)
+				CollectChatText(item, parts)
 			}
 		}
 		if content, ok := v["content"]; ok {
-			collectChatText(content, parts)
+			CollectChatText(content, parts)
 		}
 		if separator, ok := v["separator"]; ok {
-			collectChatText(separator, parts)
+			CollectChatText(separator, parts)
 		}
 	case []any:
 		for _, item := range v {
-			collectChatText(item, parts)
+			CollectChatText(item, parts)
 		}
 	}
 }
 
-// removeColorCodes 移除Minecraft颜色代码。
-func removeColorCodes(text string) string {
+// RemoveColorCodes 移除Minecraft颜色代码。
+func RemoveColorCodes(text string) string {
 	// Minecraft颜色代码: § 后面跟 [0-9a-fk-or]
 	re := regexp.MustCompile(`§[0-9a-fk-or]`)
+	return RemoveHexColorCodes(re.ReplaceAllString(text, ""))
+}
+
+// RemoveHexColorCodes 移除 1.16+ 的十六进制颜色代码 §#xxxxxx
+func RemoveHexColorCodes(text string) string {
+	re := regexp.MustCompile(`§#[0-9a-fA-F]{6}`)
 	return re.ReplaceAllString(text, "")
 }

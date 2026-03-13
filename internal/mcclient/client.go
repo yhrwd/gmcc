@@ -15,6 +15,8 @@ import (
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
+	"gmcc/internal/mcclient/packet"
+	"gmcc/internal/mcclient/protocol"
 	"gmcc/internal/player"
 	"gmcc/internal/session"
 )
@@ -40,10 +42,10 @@ type Client struct {
 
 	online *onlineSession
 
-	state  connState
+	state  protocol.State
 	inPlay bool
 
-	conn *packetConn
+	conn *packet.PacketConn
 
 	lastAFKPacket time.Time
 	chatHandler   func(ChatMessage)
@@ -60,9 +62,9 @@ func New(cfg *config.Config) *Client {
 	client := &Client{
 		cfg:         cfg,
 		offlineName: name,
-		offlineUUID: offlineUUID(name),
+		offlineUUID: packet.OfflineUUID(name),
 		username:    name,
-		uuid:        offlineUUID(name),
+		uuid:        packet.OfflineUUID(name),
 		commandSign: map[string]signableCommandTarget{},
 		Player:      player.NewPlayer(),
 	}
@@ -78,8 +80,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if strings.TrimSpace(c.offlineName) == "" {
 		return fmt.Errorf("account.player_id 不能为空")
 	}
-	logx.Infof("客户端协议: %s", protocolLabel)
-	host, port, err := parseAddress(c.cfg.Server.Address)
+	logx.Infof("客户端协议: %s", protocol.Label)
+	host, port, err := packet.ParseAddress(c.cfg.Server.Address)
 	if err != nil {
 		return err
 	}
@@ -112,7 +114,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 		c.uuid = c.offlineUUID
 	}
 
-	c.state = stateLogin
+	c.state = protocol.StateLogin
 	c.inPlay = false
 	c.chatSessionOK = false
 	c.chatSession = nil
@@ -126,7 +128,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 		return fmt.Errorf("连接服务器失败: %w", err)
 	}
 
-	c.conn = newPacketConn(rawConn)
+	c.conn = packet.NewPacketConn(rawConn)
 	defer func() {
 		_ = c.conn.Close()
 	}()
@@ -155,7 +157,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 		pkt, err := c.conn.ReadPacket()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				if c.state == statePlay {
+				if c.state == protocol.StatePlay {
 					if err := c.sendAFKHeartbeatIfNeeded(); err != nil {
 						return err
 					}
@@ -163,23 +165,23 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 				continue
 			}
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return fmt.Errorf("服务器已关闭连接 (state=%s): %w", stateName(c.state), err)
+				return fmt.Errorf("服务器已关闭连接 (state=%s): %w", c.state.String(), err)
 			}
-			return fmt.Errorf("读取数据包失败 (state=%s): %w", stateName(c.state), err)
+			return fmt.Errorf("读取数据包失败 (state=%s): %w", c.state.String(), err)
 		}
 
 		logx.PacketLogf(
 			"收到数据包: state=%s id=0x%02X (%s) len=%d",
-			stateName(c.state),
+			c.state.String(),
 			pkt.ID,
-			packetName(c.state, pkt.ID),
+			protocol.PacketName(c.state, pkt.ID),
 			len(pkt.Data),
 		)
 		if err := c.handlePacket(pkt); err != nil {
 			return err
 		}
 
-		if c.state == statePlay {
+		if c.state == protocol.StatePlay {
 			if err := c.sendAFKHeartbeatIfNeeded(); err != nil {
 				return err
 			}
@@ -200,10 +202,10 @@ func (c *Client) prepareOnlineSession() error {
 			cache.Minecraft.ProfileID,
 			cache.Minecraft.ProfileName,
 		); err == nil {
-			logx.Infof("使用缓存的 Minecraft token: %s (%s)", c.online.ProfileName, formatUUID(c.online.ProfileUUID))
+			logx.Infof("使用缓存的 Minecraft token: %s (%s)", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
 			return nil
 		}
-		logx.Warnf("检测到缓存的 Minecraft token 数据损坏，准备重新认证")
+		logx.Warnf("检测 detections 缓存的 Minecraft token 数据损坏，准备重新认证")
 	}
 
 	xstsResp, msToken, err := c.resolveXSTSToken(cache, now)
@@ -243,7 +245,7 @@ func (c *Client) prepareOnlineSession() error {
 		logx.Warnf("写入 token 缓存失败: %v", err)
 	}
 
-	logx.Infof("正版认证成功: %s (%s)", c.online.ProfileName, formatUUID(c.online.ProfileUUID))
+	logx.Infof("正版认证成功: %s (%s)", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
 	return nil
 }
 
@@ -294,7 +296,7 @@ func (c *Client) setOnlineSession(accessToken, profileID, profileName string) er
 		return fmt.Errorf("Minecraft profile 信息不完整")
 	}
 
-	profileUUID, err := parseUUID(cleanID)
+	profileUUID, err := packet.ParseUUID(cleanID)
 	if err != nil {
 		return fmt.Errorf("解析 profile UUID 失败: %w", err)
 	}
@@ -315,15 +317,15 @@ func tokenExpiresAt(expiresIn int) time.Time {
 	return time.Now().Add(time.Duration(expiresIn) * time.Second).UTC()
 }
 
-func (c *Client) handlePacket(pkt packet) error {
+func (c *Client) handlePacket(pkt packet.Packet) error {
 	switch c.state {
-	case stateLogin:
+	case protocol.StateLogin:
 		return c.handleLoginPacket(pkt)
-	case stateConfiguration:
+	case protocol.StateConfiguration:
 		return c.handleConfigurationPacket(pkt)
-	case statePlay:
+	case protocol.StatePlay:
 		return c.handlePlayPacket(pkt)
 	default:
-		return fmt.Errorf("未知连接状态: %s", stateName(c.state))
+		return fmt.Errorf("未知连接状态: %s", c.state.String())
 	}
 }

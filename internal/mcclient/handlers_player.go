@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"gmcc/internal/logx"
+	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/player"
 )
 
@@ -18,7 +19,7 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 	var health float32
 	binary.Read(r, binary.BigEndian, &health)
 
-	food, _ := readVarIntFromReader(r)
+	food, _ := packet.ReadVarIntFromReader(r)
 
 	var saturation float32
 	binary.Read(r, binary.BigEndian, &saturation)
@@ -35,8 +36,8 @@ func (c *Client) handleSetExperiencePacket(data []byte) error {
 
 	var expBar float32
 	binary.Read(r, binary.BigEndian, &expBar)
-	level, _ := readVarIntFromReader(r)
-	totalExp, _ := readVarIntFromReader(r)
+	level, _ := packet.ReadVarIntFromReader(r)
+	totalExp, _ := packet.ReadVarIntFromReader(r)
 
 	c.Player.UpdateExperience(int32(level), expBar, float32(totalExp))
 	return nil
@@ -44,7 +45,7 @@ func (c *Client) handleSetExperiencePacket(data []byte) error {
 
 func (c *Client) handleSetHeldSlotPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	slot, err := readVarIntFromReader(r)
+	slot, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return nil
 	}
@@ -58,7 +59,7 @@ func (c *Client) handleGameEventPacket(data []byte) error {
 		return nil
 	}
 
-	eventType, _ := readU8(r)
+	eventType, _ := packet.ReadU8(r)
 	var value float32
 	binary.Read(r, binary.BigEndian, &value)
 
@@ -98,25 +99,25 @@ func (c *Client) handlePlayLoginPacket(data []byte) error {
 }
 
 func (c *Client) readLoginBasicInfo(r *bytes.Reader) error {
-	entityID, err := readInt32FromReader(r)
+	entityID, err := packet.ReadInt32FromReader(r)
 	if err != nil {
 		return fmt.Errorf("读取 entity_id 失败: %w", err)
 	}
 	c.Player.SetEntityID(entityID)
 
-	if _, err := readBoolFromReader(r); err != nil {
+	if _, err := packet.ReadBoolFromReader(r); err != nil {
 		return fmt.Errorf("读取 is_hardcore 失败: %w", err)
 	}
 	return nil
 }
 
 func (c *Client) readLoginDimensions(r *bytes.Reader) error {
-	numDimensions, err := readVarIntFromReader(r)
+	numDimensions, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return fmt.Errorf("读取 dimension count 失败: %w", err)
 	}
 	for i := int32(0); i < numDimensions; i++ {
-		if _, err := readStringFromReader(r); err != nil {
+		if _, err := packet.ReadStringFromReader(r); err != nil {
 			return fmt.Errorf("读取 dimension name 失败: %w", err)
 		}
 	}
@@ -126,14 +127,14 @@ func (c *Client) readLoginDimensions(r *bytes.Reader) error {
 func (c *Client) readLoginWorldSettings(r *bytes.Reader) error {
 	fields := []string{"max_players", "view_distance", "simulation_distance"}
 	for _, field := range fields {
-		if _, err := readVarIntFromReader(r); err != nil {
+		if _, err := packet.ReadVarIntFromReader(r); err != nil {
 			return fmt.Errorf("读取 %s 失败: %w", field, err)
 		}
 	}
 
 	boolFields := []string{"reduced_debug_info", "enable_respawn_screen", "do_limited_crafting"}
 	for _, field := range boolFields {
-		if _, err := readBoolFromReader(r); err != nil {
+		if _, err := packet.ReadBoolFromReader(r); err != nil {
 			return fmt.Errorf("读取 %s 失败: %w", field, err)
 		}
 	}
@@ -141,11 +142,11 @@ func (c *Client) readLoginWorldSettings(r *bytes.Reader) error {
 }
 
 func (c *Client) readLoginPlayerState(r *bytes.Reader) error {
-	if _, err := readVarIntFromReader(r); err != nil {
+	if _, err := packet.ReadVarIntFromReader(r); err != nil {
 		return fmt.Errorf("读取 dimension_type 失败: %w", err)
 	}
 
-	dimensionName, err := readStringFromReader(r)
+	dimensionName, err := packet.ReadStringFromReader(r)
 	if err != nil {
 		return fmt.Errorf("读取 dimension_name 失败: %w", err)
 	}
@@ -154,25 +155,25 @@ func (c *Client) readLoginPlayerState(r *bytes.Reader) error {
 	var hashedSeed int64
 	binary.Read(r, binary.BigEndian, &hashedSeed)
 
-	gameMode, err := readU8(r)
+	gameMode, err := packet.ReadU8(r)
 	if err != nil {
 		return fmt.Errorf("读取 game_mode 失败: %w", err)
 	}
 	c.Player.SetGameMode(player.GameMode(int(gameMode)))
 
-	_, _ = readU8(r)             // prevGameMode
-	_, _ = readBoolFromReader(r) // isDebug
-	_, _ = readBoolFromReader(r) // isFlat
+	_, _ = packet.ReadU8(r)             // prevGameMode
+	_, _ = packet.ReadBoolFromReader(r) // isDebug
+	_, _ = packet.ReadBoolFromReader(r) // isFlat
 	return nil
 }
 
 func (c *Client) readLoginDeathLocation(r *bytes.Reader) error {
-	hasDeathLocation, err := readBoolFromReader(r)
+	hasDeathLocation, err := packet.ReadBoolFromReader(r)
 	if err != nil {
 		return fmt.Errorf("读取 has_death_location 失败: %w", err)
 	}
 	if hasDeathLocation {
-		if _, err := readStringFromReader(r); err != nil {
+		if _, err := packet.ReadStringFromReader(r); err != nil {
 			return fmt.Errorf("读取 death_dimension 失败: %w", err)
 		}
 		var deathPos int64
@@ -182,25 +183,25 @@ func (c *Client) readLoginDeathLocation(r *bytes.Reader) error {
 }
 
 func (c *Client) readLoginMisc(r *bytes.Reader) error {
-	_, _ = readVarIntFromReader(r) // portalCooldown
-	_, _ = readVarIntFromReader(r) // seaLevel
-	_, _ = readBoolFromReader(r)   // secureChatEnforced
+	_, _ = packet.ReadVarIntFromReader(r) // portalCooldown
+	_, _ = packet.ReadVarIntFromReader(r) // seaLevel
+	_, _ = packet.ReadBoolFromReader(r)   // secureChatEnforced
 	return nil
 }
 
 func (c *Client) handleEntityDataPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	entityID, err := readVarIntFromReader(r)
+	entityID, err := packet.ReadVarIntFromReader(r)
 	if err != nil || entityID != c.Player.EntityID {
 		return nil
 	}
 
 	for {
-		index, err := readU8(r)
+		index, err := packet.ReadU8(r)
 		if err != nil || index == 0xFF {
 			break
 		}
-		typeID, err := readVarIntFromReader(r)
+		typeID, err := packet.ReadVarIntFromReader(r)
 		if err != nil {
 			break
 		}
@@ -214,12 +215,12 @@ func (c *Client) handleEntityDataPacket(data []byte) error {
 
 func (c *Client) handleContainerContentPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	windowID, err := readVarIntFromReader(r)
+	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return nil
 	}
-	stateID, _ := readVarIntFromReader(r)
-	numItems, _ := readVarIntFromReader(r)
+	stateID, _ := packet.ReadVarIntFromReader(r)
+	numItems, _ := packet.ReadVarIntFromReader(r)
 	if numItems > 1000 { // Safety limit
 		numItems = 1000
 	}
@@ -228,13 +229,13 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 
 	items := make([]*player.SlotData, numItems)
 	for i := int32(0); i < numItems; i++ {
-		slot, err := readSlotData(r)
+		slot, err := packet.ReadSlotData(r)
 		if err == nil && slot != nil {
 			items[i] = &player.SlotData{ID: slot.ID, Count: slot.Count}
 		}
 	}
 
-	carriedItem, _ := readSlotData(r)
+	carriedItem, _ := packet.ReadSlotData(r)
 	var carried *player.SlotData
 	if carriedItem != nil {
 		carried = &player.SlotData{ID: carriedItem.ID, Count: carriedItem.Count}
@@ -246,13 +247,13 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 
 func (c *Client) handleContainerSlotPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	windowID, _ := readVarIntFromReader(r)
-	stateID, _ := readVarIntFromReader(r)
+	windowID, _ := packet.ReadVarIntFromReader(r)
+	stateID, _ := packet.ReadVarIntFromReader(r)
 
 	var slot int16
 	binary.Read(r, binary.BigEndian, &slot)
 
-	item, _ := readSlotData(r)
+	item, _ := packet.ReadSlotData(r)
 	var slotItem *player.SlotData
 	if item != nil {
 		slotItem = &player.SlotData{ID: item.ID, Count: item.Count}

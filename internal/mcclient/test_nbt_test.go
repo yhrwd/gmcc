@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/nbt"
 )
 
@@ -124,9 +125,9 @@ func TestReadAnonymousNBTJSON(t *testing.T) {
 		0x00,
 	}
 
-	jsonStr, err := readAnonymousNBTJSON(bytes.NewReader(data))
+	jsonStr, err := packet.ReadAnonymousNBTJSON(bytes.NewReader(data))
 	if err != nil {
-		t.Fatalf("readAnonymousNBTJSON failed: %v", err)
+		t.Fatalf("ReadAnonymousNBTJSON failed: %v", err)
 	}
 
 	var parsed map[string]any

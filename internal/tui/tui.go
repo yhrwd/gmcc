@@ -14,6 +14,7 @@ import (
 
 	"gmcc/internal/config"
 	"gmcc/internal/mcclient"
+	"gmcc/internal/mcclient/chat"
 )
 
 type TUI struct {
@@ -63,7 +64,7 @@ func (t *TUI) Run(ctx context.Context) error {
 	t.client.SetChatHandler(func(msg mcclient.ChatMessage) {
 		var text string
 		if msg.RawJSON != "" {
-			comp, err := mcclient.ParseTextComponent(msg.RawJSON)
+			comp, err := chat.ParseTextComponent(msg.RawJSON)
 			if err == nil {
 				text = comp.ToANSI()
 			} else {

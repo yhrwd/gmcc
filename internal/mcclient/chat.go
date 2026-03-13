@@ -1,7 +1,6 @@
 package mcclient
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -9,7 +8,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -18,7 +16,8 @@ import (
 
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/logx"
-	"gmcc/internal/nbt"
+	"gmcc/internal/mcclient/packet"
+	"gmcc/internal/mcclient/protocol"
 	"gmcc/internal/player"
 )
 
@@ -58,7 +57,7 @@ func (c *Client) SendCommand(command string) error {
 	if cmd == "" {
 		return fmt.Errorf("command 不能为空")
 	}
-	if c.state != statePlay {
+	if c.state != protocol.StatePlay {
 		return fmt.Errorf("当前状态不是 Play，无法发送命令")
 	}
 
@@ -77,7 +76,7 @@ func (c *Client) SendCommandSigned(command string) error {
 	if cmd == "" {
 		return fmt.Errorf("command 不能为空")
 	}
-	if c.state != statePlay {
+	if c.state != protocol.StatePlay {
 		return fmt.Errorf("当前状态不是 Play，无法发送命令")
 	}
 
@@ -98,7 +97,7 @@ func (c *Client) SendMessage(message string) error {
 	if msg == "" {
 		return fmt.Errorf("message 不能为空")
 	}
-	if c.state != statePlay {
+	if c.state != protocol.StatePlay {
 		return fmt.Errorf("当前状态不是 Play，无法发送聊天消息")
 	}
 
@@ -115,18 +114,18 @@ func (c *Client) SendMessage(message string) error {
 	}
 
 	payload := make([]byte, 0, len(msg)+64)
-	payload = append(payload, encodeString(msg)...)
-	payload = append(payload, encodeInt64(timestamp)...)
-	payload = append(payload, encodeInt64(salt)...)
-	payload = append(payload, encodeBool(hasSignature)...)
+	payload = append(payload, packet.EncodeString(msg)...)
+	payload = append(payload, packet.EncodeInt64(timestamp)...)
+	payload = append(payload, packet.EncodeInt64(salt)...)
+	payload = append(payload, packet.EncodeBool(hasSignature)...)
 	if hasSignature {
 		payload = append(payload, signature...)
 	}
-	payload = append(payload, encodeVarInt(0)...)
+	payload = append(payload, packet.EncodeVarInt(0)...)
 	payload = append(payload, 0x00, 0x00, 0x00)
 	payload = append(payload, 0x01)
 
-	if err := c.conn.WritePacket(playServerChatMessage, payload); err != nil {
+	if err := c.conn.WritePacket(protocol.PlayServerChatMessage, payload); err != nil {
 		return fmt.Errorf("发送聊天消息失败: %w", err)
 	}
 	logx.Infof("已发送聊天消息: %s", msg)
@@ -300,11 +299,11 @@ func (c *Client) sendChatSessionUpdate(session *secureChatSession, cert *mcauth.
 
 	payload := make([]byte, 0, len(pubDER)+len(sig)+64)
 	payload = append(payload, session.sessionID[:]...)
-	payload = append(payload, encodeInt64(expireMillis)...)
-	payload = append(payload, encodeByteArray(pubDER)...)
-	payload = append(payload, encodeByteArray(sig)...)
+	payload = append(payload, packet.EncodeInt64(expireMillis)...)
+	payload = append(payload, packet.EncodeByteArray(pubDER)...)
+	payload = append(payload, packet.EncodeByteArray(sig)...)
 
-	return c.conn.WritePacket(playServerChatSession, payload)
+	return c.conn.WritePacket(protocol.PlayServerChatSession, payload)
 }
 
 func decodeCertificateSignature(cert *mcauth.PlayerCertificatesResponse) ([]byte, error) {
@@ -351,9 +350,9 @@ func randomUUIDv4() ([16]byte, error) {
 }
 
 func (c *Client) sendUnsignedCommand(cmd string) error {
-	payload := encodeString(cmd)
+	payload := packet.EncodeString(cmd)
 	logx.Debugf("命令包内容 (hex): %x", payload)
-	return c.conn.WritePacket(playServerChatCommand, payload)
+	return c.conn.WritePacket(protocol.PlayServerChatCommand, payload)
 }
 
 func (c *Client) sendSignedCommand(cmd string) error {
@@ -369,22 +368,22 @@ func (c *Client) sendSignedCommand(cmd string) error {
 	}
 
 	payload := make([]byte, 0, len(cmd)+64)
-	payload = append(payload, encodeString(cmd)...)
-	payload = append(payload, encodeInt64(timestamp)...)
-	payload = append(payload, encodeInt64(salt)...)
-	payload = append(payload, encodeVarInt(int32(len(argSignatures)))...)
+	payload = append(payload, packet.EncodeString(cmd)...)
+	payload = append(payload, packet.EncodeInt64(timestamp)...)
+	payload = append(payload, packet.EncodeInt64(salt)...)
+	payload = append(payload, packet.EncodeVarInt(int32(len(argSignatures)))...)
 	for _, sig := range argSignatures {
 		if len(sig.signature) != 256 {
 			return fmt.Errorf("命令参数签名长度无效: %d", len(sig.signature))
 		}
-		payload = append(payload, encodeString(sig.name)...)
+		payload = append(payload, packet.EncodeString(sig.name)...)
 		payload = append(payload, sig.signature...)
 	}
-	payload = append(payload, encodeVarInt(0)...) // messageCount
-	payload = append(payload, 0x00, 0x00, 0x00)   // acknowledged (3 bytes)
-	payload = append(payload, 0x01)               // checksum (u8, 1 when no seen signatures)
+	payload = append(payload, packet.EncodeVarInt(0)...) // messageCount
+	payload = append(payload, 0x00, 0x00, 0x00)          // acknowledged (3 bytes)
+	payload = append(payload, 0x01)                      // checksum (u8, 1 when no seen signatures)
 
-	return c.conn.WritePacket(playServerChatCommandSign, payload)
+	return c.conn.WritePacket(protocol.PlayServerChatCommandSign, payload)
 }
 
 func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int64, salt int64) ([]commandArgumentSignature, error) {
@@ -444,17 +443,17 @@ func (c *Client) signChatBody(content string, timestampMillis int64, salt int64,
 
 	contentBytes := []byte(content)
 	signable := make([]byte, 0, len(contentBytes)+128+len(acknowledgements)*256)
-	signable = append(signable, encodeInt32(1)...)
+	signable = append(signable, packet.EncodeInt32(1)...)
 	signable = append(signable, c.uuid[:]...)
 	signable = append(signable, c.chatSession.sessionID[:]...)
-	signable = append(signable, encodeInt32(c.chatSession.messageIndex)...)
+	signable = append(signable, packet.EncodeInt32(c.chatSession.messageIndex)...)
 	c.chatSession.messageIndex++
-	signable = append(signable, encodeInt64(salt)...)
-	signable = append(signable, encodeInt64(timestampMillis/1000)...)
-	signable = append(signable, encodeInt32(int32(len(contentBytes)))...)
+	signable = append(signable, packet.EncodeInt64(salt)...)
+	signable = append(signable, packet.EncodeInt64(timestampMillis/1000)...)
+	signable = append(signable, packet.EncodeInt32(int32(len(contentBytes)))...)
 	// 签名体这里是 Int32 length + 原始 UTF-8 内容，不是协议 String(VarInt length)。
 	signable = append(signable, contentBytes...)
-	signable = append(signable, encodeInt32(int32(len(acknowledgements)))...)
+	signable = append(signable, packet.EncodeInt32(int32(len(acknowledgements)))...)
 	for _, ack := range acknowledgements {
 		signable = append(signable, ack...)
 	}
@@ -467,165 +466,8 @@ func (c *Client) signChatBody(content string, timestampMillis int64, salt int64,
 	return sig, nil
 }
 
-type commandNodeWire struct {
-	NodeType byte
-	Name     string
-	ParserID int32
-	Children []int32
-}
-
-func extractSignableCommandTargets(nodes []commandNodeWire, rootIndex int32) map[string]signableCommandTarget {
-	targets := make(map[string]signableCommandTarget)
-	if rootIndex < 0 || int(rootIndex) >= len(nodes) {
-		return targets
-	}
-
-	root := nodes[rootIndex]
-	for _, literalIdx := range root.Children {
-		if literalIdx < 0 || int(literalIdx) >= len(nodes) {
-			continue
-		}
-		literal := nodes[literalIdx]
-		if literal.NodeType != 1 || literal.Name == "" {
-			continue
-		}
-
-		pathSeen := map[int32]bool{}
-		var walk func(idx int32, depth int)
-		walk = func(idx int32, depth int) {
-			if idx < 0 || int(idx) >= len(nodes) || pathSeen[idx] {
-				return
-			}
-			pathSeen[idx] = true
-			node := nodes[idx]
-
-			if node.NodeType == 2 && (node.ParserID == 5 || node.ParserID == 20) {
-				target := signableCommandTarget{
-					ArgumentName: node.Name,
-					SliceIndex:   depth,
-				}
-				old, exists := targets[literal.Name]
-				if !exists || target.SliceIndex < old.SliceIndex {
-					targets[literal.Name] = target
-				}
-			}
-
-			for _, child := range node.Children {
-				walk(child, depth+1)
-			}
-			delete(pathSeen, idx)
-		}
-
-		walk(literalIdx, 0)
-	}
-
-	return targets
-}
-
-func skipCommandParserProperties(r *bytes.Reader, parserID int32) error {
-	switch parserID {
-	case 1: // brigadier:float
-		flags, err := readU8(r)
-		if err != nil {
-			return err
-		}
-		if flags&0x01 != 0 {
-			if err := discardN(r, 4); err != nil {
-				return err
-			}
-		}
-		if flags&0x02 != 0 {
-			if err := discardN(r, 4); err != nil {
-				return err
-			}
-		}
-	case 2: // brigadier:double
-		flags, err := readU8(r)
-		if err != nil {
-			return err
-		}
-		if flags&0x01 != 0 {
-			if err := discardN(r, 8); err != nil {
-				return err
-			}
-		}
-		if flags&0x02 != 0 {
-			if err := discardN(r, 8); err != nil {
-				return err
-			}
-		}
-	case 3: // brigadier:integer
-		flags, err := readU8(r)
-		if err != nil {
-			return err
-		}
-		if flags&0x01 != 0 {
-			if err := discardN(r, 4); err != nil {
-				return err
-			}
-		}
-		if flags&0x02 != 0 {
-			if err := discardN(r, 4); err != nil {
-				return err
-			}
-		}
-	case 4: // brigadier:long
-		flags, err := readU8(r)
-		if err != nil {
-			return err
-		}
-		if flags&0x01 != 0 {
-			if err := discardN(r, 8); err != nil {
-				return err
-			}
-		}
-		if flags&0x02 != 0 {
-			if err := discardN(r, 8); err != nil {
-				return err
-			}
-		}
-	case 5: // brigadier:string
-		if _, err := readVarInt(r); err != nil {
-			return err
-		}
-	case 6: // minecraft:entity
-		if _, err := readU8(r); err != nil {
-			return err
-		}
-	case 31: // minecraft:score_holder
-		if _, err := readU8(r); err != nil {
-			return err
-		}
-	case 43: // minecraft:time
-		if _, err := readInt32(r); err != nil {
-			return err
-		}
-	case 44, 45, 46, 47, 48: // resource* parsers
-		if _, err := readString(r, r); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func discardN(r io.Reader, n int64) error {
-	_, err := io.CopyN(io.Discard, r, n)
-	return err
-}
-
-func readAnonymousNBTJSON(r io.Reader) (string, error) {
-	dec := nbt.NewDecoder(r)
-	dec.NetworkFormat(true)
-	var v any
-	if err := dec.Decode(&v); err != nil {
-		return "", err
-	}
-
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+func (c *Client) readAnonymousNBTJSON(r io.Reader) (string, error) {
+	return packet.ReadAnonymousNBTJSON(r)
 }
 
 func parsePublicKeyPEMToSPKIDER(publicKeyPEM string) ([]byte, error) {
