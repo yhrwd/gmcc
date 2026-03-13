@@ -370,3 +370,46 @@ func (c *TextComponent) renderPlain(sb *strings.Builder) {
 		extra.renderPlain(sb)
 	}
 }
+
+// MessageBuilder helps build complex Minecraft text components
+type MessageBuilder struct {
+	root TextComponent
+	curr *TextComponent
+}
+
+func NewMessageBuilder(text string) *MessageBuilder {
+	b := &MessageBuilder{}
+	b.root.Text = text
+	b.curr = &b.root
+	return b
+}
+
+func (b *MessageBuilder) Color(color string) *MessageBuilder {
+	b.curr.Color = color
+	return b
+}
+
+func (b *MessageBuilder) Bold(v bool) *MessageBuilder {
+	b.curr.Bold = v
+	return b
+}
+
+func (b *MessageBuilder) Italic(v bool) *MessageBuilder {
+	b.curr.Italic = v
+	return b
+}
+
+func (b *MessageBuilder) Add(text string) *MessageBuilder {
+	b.root.Extra = append(b.root.Extra, TextComponent{Text: text})
+	b.curr = &b.root.Extra[len(b.root.Extra)-1]
+	return b
+}
+
+func (b *MessageBuilder) Build() TextComponent {
+	return b.root
+}
+
+func (b *MessageBuilder) BuildJSON() string {
+	data, _ := json.Marshal(b.root)
+	return string(data)
+}

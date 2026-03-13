@@ -130,15 +130,21 @@ func (e *Encoder) tagTypeOf(val reflect.Value) byte {
 	switch val.Kind() {
 	case reflect.Bool:
 		return TagByte
-	case reflect.Int, reflect.Int8:
+	case reflect.Int8:
 		return TagByte
 	case reflect.Int16:
 		return TagShort
-	case reflect.Int32:
+	case reflect.Int32, reflect.Int:
 		return TagInt
 	case reflect.Int64:
 		return TagLong
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint8:
+		return TagByte
+	case reflect.Uint16:
+		return TagShort
+	case reflect.Uint32, reflect.Uint:
+		return TagInt
+	case reflect.Uint64:
 		return TagLong
 	case reflect.Float32:
 		return TagFloat

@@ -74,3 +74,13 @@ type RawMessage struct {
 
 func (m RawMessage) TagType() byte  { return m.Type }
 func (m RawMessage) String() string { return string(m.Data) }
+
+// Explicit type wrappers for map[string]any encoding
+type (
+	Byte   int8
+	Short  int16
+	Int    int32
+	Long   int64
+	Float  float32
+	Double float64
+)
