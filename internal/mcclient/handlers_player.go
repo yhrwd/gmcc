@@ -11,19 +11,23 @@ import (
 )
 
 func (c *Client) handleSetHealthPacket(data []byte) error {
-	logx.Debugf("收到 set_health 包, len=%d, data=%x", len(data), data)
+	logx.Debugf("set_health raw: len=%d, hex=%x", len(data), data)
 
 	r := bytes.NewReader(data)
 	if r.Len() < 12 {
-		logx.Warnf("set_health 数据太短: len=%d, need 12", len(data))
+		logx.Warnf("set_health 数据太短: len=%d", len(data))
 		return nil
 	}
 
-	health, _ := readFloat32(r)
-	food, _ := readVarIntFromReader(r)
-	saturation, _ := readFloat32(r)
+	var health float32
+	binary.Read(r, binary.BigEndian, &health)
 
-	logx.Debugf("收到 set_health: health=%.1f, food=%d, saturation=%.1f", health, food, saturation)
+	food, _ := readVarIntFromReader(r)
+
+	var saturation float32
+	binary.Read(r, binary.BigEndian, &saturation)
+
+	logx.Debugf("set_health: health=%.1f, food=%d, saturation=%.1f", health, food, saturation)
 
 	c.Player.UpdateHealth(health, 0, int32(food), saturation)
 	return nil
@@ -49,6 +53,7 @@ func (c *Client) handleSetHeldSlotPacket(data []byte) error {
 	if err != nil {
 		return nil
 	}
+	logx.Debugf("set_held_slot: slot=%d, raw=%x", slot, data)
 	c.Player.SetHeldSlot(int8(slot))
 	return nil
 }

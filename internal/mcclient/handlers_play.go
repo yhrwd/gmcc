@@ -40,10 +40,34 @@ func (c *Client) handlePlayPacket(pkt packet) error {
 
 	case playClientPosition:
 		r := bytes.NewReader(pkt.Data)
+
 		teleportID, err := readVarInt(r)
 		if err != nil {
 			return fmt.Errorf("读取 player_position teleport id 失败: %w", err)
 		}
+
+		x, _ := readFloat64FromReader(r)
+		y, _ := readFloat64FromReader(r)
+		z, _ := readFloat64FromReader(r)
+
+		deltaX, _ := readFloat64FromReader(r)
+		deltaY, _ := readFloat64FromReader(r)
+		deltaZ, _ := readFloat64FromReader(r)
+
+		yRot, _ := readFloat32(r)
+		xRot, _ := readFloat32(r)
+
+		relBits, _ := readInt32(r)
+
+		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x",
+			teleportID, x, y, z, yRot, xRot, relBits)
+
+		c.Player.UpdatePosition(x, y, z, yRot, xRot, int8(relBits))
+
+		_ = deltaX
+		_ = deltaY
+		_ = deltaZ
+
 		if err := c.conn.WritePacket(playServerAcceptTeleport, encodeVarInt(teleportID)); err != nil {
 			return fmt.Errorf("发送 accept_teleportation 失败: %w", err)
 		}
