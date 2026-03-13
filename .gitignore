@@ -50,3 +50,6 @@ logs/
 config.yaml
 id.txt
 .knowledge/
+.agents/
+skills-lock.json
+my-knowledge-skill/
