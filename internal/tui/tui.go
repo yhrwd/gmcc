@@ -145,86 +145,110 @@ func (t *TUI) handleInput(data []byte, inputCh chan []byte) bool {
 
 	b := data[0]
 	switch b {
-	case 3:
-		t.addLog("\x1b[33m[提示] 退出\x1b[0m")
-		t.render()
-		time.Sleep(300 * time.Millisecond)
-		return true
-	case 13, 10:
-		if t.inputBuf == "" {
-			return false
-		}
-		t.processInput(t.inputBuf)
-		if len(t.history) == 0 || t.history[len(t.history)-1] != t.inputBuf {
-			t.history = append(t.history, t.inputBuf)
-			if len(t.history) > 100 {
-				t.history = t.history[1:]
-			}
-		}
-		t.histIdx = -1
-		t.inputBuf = ""
-		t.requestRedraw()
-	case 127, 8:
-		if len(t.inputBuf) > 0 {
-			runes := []rune(t.inputBuf)
-			if len(runes) > 0 {
-				t.inputBuf = string(runes[:len(runes)-1])
-			}
-			t.requestRedraw()
-		}
-	case 27:
-		seq := make([]byte, 0, 4)
-		timeout := time.NewTimer(50 * time.Millisecond)
-		defer timeout.Stop()
-	seqLoop:
-		for {
-			select {
-			case b2, ok := <-inputCh:
-				if !ok {
-					break seqLoop
-				}
-				seq = append(seq, b2...)
-				if len(seq) >= 2 && seq[0] == '[' {
-					switch seq[1] {
-					case 'A':
-						if len(t.history) > 0 {
-							if t.histIdx == -1 {
-								t.histIdx = len(t.history) - 1
-							} else if t.histIdx > 0 {
-								t.histIdx--
-							}
-							t.inputBuf = t.history[t.histIdx]
-							t.requestRedraw()
-						}
-						break seqLoop
-					case 'B':
-						if t.histIdx != -1 {
-							if t.histIdx < len(t.history)-1 {
-								t.histIdx++
-								t.inputBuf = t.history[t.histIdx]
-							} else {
-								t.histIdx = -1
-								t.inputBuf = ""
-							}
-							t.requestRedraw()
-						}
-						break seqLoop
-					case 'C', 'D':
-						break seqLoop
-					}
-				}
-				if len(seq) >= 3 {
-					break seqLoop
-				}
-			case <-timeout.C:
-				break seqLoop
-			}
-		}
+	case 3: // Ctrl+C
+		return t.handleExit()
+	case 13, 10: // Enter
+		t.handleEnter()
+	case 127, 8: // Backspace
+		t.handleBackspace()
+	case 27: // ESC
+		t.handleEscapeSequence(inputCh)
 	default:
 		if b >= 32 {
 			t.inputBuf += string(data)
 			t.requestRedraw()
 		}
+	}
+	return false
+}
+
+func (t *TUI) handleExit() bool {
+	t.addLog("\x1b[33m[提示] 退出\x1b[0m")
+	t.render()
+	time.Sleep(300 * time.Millisecond)
+	return true
+}
+
+func (t *TUI) handleEnter() {
+	if t.inputBuf == "" {
+		return
+	}
+	t.processInput(t.inputBuf)
+	if len(t.history) == 0 || t.history[len(t.history)-1] != t.inputBuf {
+		t.history = append(t.history, t.inputBuf)
+		if len(t.history) > 100 {
+			t.history = t.history[1:]
+		}
+	}
+	t.histIdx = -1
+	t.inputBuf = ""
+	t.requestRedraw()
+}
+
+func (t *TUI) handleBackspace() {
+	if len(t.inputBuf) > 0 {
+		runes := []rune(t.inputBuf)
+		if len(runes) > 0 {
+			t.inputBuf = string(runes[:len(runes)-1])
+		}
+		t.requestRedraw()
+	}
+}
+
+func (t *TUI) handleEscapeSequence(inputCh chan []byte) {
+	seq := make([]byte, 0, 4)
+	timeout := time.NewTimer(50 * time.Millisecond)
+	defer timeout.Stop()
+
+seqLoop:
+	for {
+		select {
+		case b2, ok := <-inputCh:
+			if !ok {
+				break seqLoop
+			}
+			seq = append(seq, b2...)
+			if len(seq) >= 2 && seq[0] == '[' {
+				if t.handleAnsiControlSequence(seq[1]) {
+					break seqLoop
+				}
+			}
+			if len(seq) >= 3 {
+				break seqLoop
+			}
+		case <-timeout.C:
+			break seqLoop
+		}
+	}
+}
+
+func (t *TUI) handleAnsiControlSequence(cmd byte) bool {
+	switch cmd {
+	case 'A': // Up
+		if len(t.history) > 0 {
+			if t.histIdx == -1 {
+				t.histIdx = len(t.history) - 1
+			} else if t.histIdx > 0 {
+				t.histIdx--
+			}
+			t.inputBuf = t.history[t.histIdx]
+			t.requestRedraw()
+		}
+		return true
+	case 'B': // Down
+		if t.histIdx != -1 {
+			if t.histIdx < len(t.history)-1 {
+				t.histIdx++
+				t.inputBuf = t.history[t.histIdx]
+			} else {
+				t.histIdx = -1
+				t.inputBuf = ""
+			}
+			t.requestRedraw()
+		}
+		return true
+	case 'C', 'D': // Right, Left
+		return true
 	}
 	return false
 }

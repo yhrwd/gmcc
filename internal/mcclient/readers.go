@@ -66,32 +66,37 @@ func readSlotData(r *bytes.Reader) (*SlotData, error) {
 
 	itemID, err := readVarIntFromReader(r)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
-	numComponentsToAdd, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil, nil
-	}
-
-	for i := int32(0); i < numComponentsToAdd; i++ {
-		if err := skipComponentData(r); err != nil {
-			return nil, nil
-		}
-	}
-
-	numComponentsToRemove, err := readVarIntFromReader(r)
-	if err != nil {
-		return nil, nil
-	}
-
-	for i := int32(0); i < numComponentsToRemove; i++ {
-		if _, err := readVarIntFromReader(r); err != nil {
-			return nil, nil
-		}
+	if err := skipSlotComponents(r); err != nil {
+		return nil, err
 	}
 
 	return &SlotData{ID: itemID, Count: count}, nil
+}
+
+func skipSlotComponents(r *bytes.Reader) error {
+	numAdd, err := readVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < numAdd; i++ {
+		if err := skipComponentData(r); err != nil {
+			return err
+		}
+	}
+
+	numRemove, err := readVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < numRemove; i++ {
+		if _, err := readVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func skipComponentData(r *bytes.Reader) error {
