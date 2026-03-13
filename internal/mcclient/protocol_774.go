@@ -65,13 +65,13 @@ const (
 	playClientPackPush         int32 = 0x4F
 	playClientActionBar        int32 = 0x55
 	playClientSystemChat       int32 = 0x77
-	playClientSetHealth        int32 = 0x54
-	playClientSetExperience    int32 = 0x4D
+	playClientSetHealth        int32 = 0x66
+	playClientSetExperience    int32 = 0x65
 	playClientPlayerInfoUpdate int32 = 0x42
 	playClientPlayerInfoRemove int32 = 0x3D
-	playClientSetHeldSlot      int32 = 0x65
-	playClientContainerContent int32 = 0x11
-	playClientContainerSlot    int32 = 0x14
+	playClientSetHeldSlot      int32 = 0x2F
+	playClientContainerContent int32 = 0x12
+	playClientContainerSlot    int32 = 0x16
 	playClientEntityData       int32 = 0x5D
 	playClientGameEvent        int32 = 0x22
 
@@ -153,13 +153,13 @@ var playClientPacketNames = map[int32]string{
 	playClientPackPush:         "resource_pack_push",
 	playClientActionBar:        "action_bar",
 	playClientSystemChat:       "system_chat",
-	playClientSetHealth:        "set_health",
-	playClientSetExperience:    "set_experience",
+	playClientSetHealth:        "update_health",
+	playClientSetExperience:    "experience",
 	playClientPlayerInfoUpdate: "player_info_update",
 	playClientPlayerInfoRemove: "player_info_remove",
-	playClientSetHeldSlot:      "set_held_slot",
-	playClientContainerContent: "container_set_content",
-	playClientContainerSlot:    "container_set_slot",
+	playClientSetHeldSlot:      "held_item_change",
+	playClientContainerContent: "window_items",
+	playClientContainerSlot:    "set_slot",
 	playClientEntityData:       "entity_data",
 	playClientGameEvent:        "game_event",
 }
