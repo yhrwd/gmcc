@@ -70,8 +70,10 @@ const (
 	PlayClientPlayerInfoUpdate int32 = 0x42
 	PlayClientPlayerInfoRemove int32 = 0x3D
 	PlayClientSetHeldSlot      int32 = 0x2F
+	PlayClientContainerClose   int32 = 0x11
 	PlayClientContainerContent int32 = 0x12
-	PlayClientContainerSlot    int32 = 0x16
+	PlayClientContainerSetData int32 = 0x13
+	PlayClientContainerSlot    int32 = 0x14
 	PlayClientEntityData       int32 = 0x5D
 	PlayClientGameEvent        int32 = 0x22
 
@@ -158,8 +160,10 @@ var PlayClientPacketNames = map[int32]string{
 	PlayClientPlayerInfoUpdate: "player_info_update",
 	PlayClientPlayerInfoRemove: "player_info_remove",
 	PlayClientSetHeldSlot:      "held_item_change",
-	PlayClientContainerContent: "window_items",
-	PlayClientContainerSlot:    "set_slot",
+	PlayClientContainerClose:   "container_close",
+	PlayClientContainerContent: "container_set_content",
+	PlayClientContainerSetData: "container_set_data",
+	PlayClientContainerSlot:    "container_set_slot",
 	PlayClientEntityData:       "entity_data",
 	PlayClientGameEvent:        "game_event",
 }

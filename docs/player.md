@@ -132,46 +132,35 @@ Pitch: 俯仰角度（-90=上，90=下）
 
 ## 背包系统
 
-### 设置物品槽 (0x2D play_client_set_held_slot)
+### 设置物品槽 (0x2F play_client_set_held_slot)
 
 ```
-int8         slot  // 0-8, 快捷栏索引
+varint       slot  // 0-8, 快捷栏索引
 ```
 
-### 容器内容 (0x11 play_client_container_set_content)
+### 容器内容 (0x12 play_client_container_set_content)
 
 ```
-int8         window_id
-int32        state_id
-array        items  // 槽位物品数组
-item_count   carried_item  // 光标物品
+varint       window_id
+varint       state_id
+varint       count         // 物品槽位数组长度
+slot[]       slots         // 所有槽位的物品数据
+slot         carried_item  // 光标物品
 ```
 
-#### 物品槽位结构
+### 容器槽位变化 (0x16 play_client_container_set_slot)
 
 ```
-option<bool>   has_item
-if has_item {
-    int32      item_id
-    int32      count
-    array      component_data  // 数据组件
-    
-    // 常见组件类型
-    - damage (耐久度)
-    - enchantments (附魔)
-    - display_name (显示名)
-    - lore (描述)
-    - custom_model_data (自定义模型)
-}
+varint       window_id
+varint       state_id
+int16        slot          // 槽位索引
+slot         item_data     // 物品数据
 ```
 
-### 容器槽位变化 (0x14 play_client_container_set_slot)
+### 光标物品 (0x5E play_client_set_cursor_item)
 
 ```
-int8         window_id
-int32        state_id
-int8         slot
-item         item_data
+slot         carried_item  // 光标物品数据
 ```
 
 ### 容器类型
@@ -181,14 +170,44 @@ item         item_data
 | 0 | 玩家背包 |
 | 1-99 | 动态容器 ID |
 
-### 玩家背包槽位
+### 玩家背包槽位 (Window ID = 0)
 
 ```
-槽位 0-8:   快捷栏
-槽位 9-35:  主背包
-槽位 36-39: 盔甲 (头盔→靴子)
-槽位 40:    左手（副手）
-槽位 41-46: 合成区
+槽位 0-8:   快捷栏 (Hotbar)
+槽位 9-35:  主背包 (Main Inventory)
+槽位 36-39: 盔甲 (Armor: 头盔→靴子)
+槽位 40:    左手/副手 (Offhand)
+```
+
+注意: 玩家背包总共有 46 个槽位 (索引 0-45)，但窗口大小因版本和容器类型而异。
+
+### Slot 数据格式 (普通格式)
+
+普通格式用于 `container_set_content` 和 `container_set_slot` 包:
+
+```
+varint       item_count    // 物品数量，如果 ≤ 0 表示空槽位
+if count > 0:
+    varint   item_id       // 物品 ID (注册表中的 ID)
+    varint   num_add       // 要添加的组件数量
+    for each component:
+        varint   component_type
+        ...      component_data (取决于类型)
+    varint   num_remove    // 要移除的组件数量
+    for each component:
+        varint   component_type
+```
+
+### Hashed Slot 数据格式
+
+哈希格式仅用于 `click_container` 包，组件数据以 CRC32C 校验和形式发送:
+
+```
+bool         has_item      // 是否有物品
+if has_item:
+    varint   item_id
+    varint   item_count
+    ...      components (哈希格式)
 ```
 
 ### 物品 ID
@@ -460,17 +479,20 @@ func (c *Client) handlePlayerPositionPacket(data []byte) error {
 func (c *Client) handleContainerSetContentPacket(data []byte) error {
     r := bytes.NewReader(data)
     
-    windowID, _ := readU8(r)
+    windowID, _ := readVarInt(r)
     stateID, _ := readVarInt(r)
-    
     count, _ := readVarInt(r)
+    
+    items := make([]*SlotData, count)
     for i := int32(0); i < count; i++ {
-        item, _ := readSlot(r)
-        c.player.UpdateInventorySlot(int8(windowID), stateID, int8(i), item)
+        items[i], _ = readSlot(r)
     }
     
-    // 光标物品
-    cursorItem, _ := readSlot(r)
+    carriedItem, _ := readSlot(r)
+    
+    if c.player != nil {
+        c.player.UpdateInventory(windowID, items, carriedItem)
+    }
     
     return nil
 }
@@ -478,13 +500,64 @@ func (c *Client) handleContainerSetContentPacket(data []byte) error {
 func (c *Client) handleContainerSetSlotPacket(data []byte) error {
     r := bytes.NewReader(data)
     
-    windowID, _ := readU8(r)
+    windowID, _ := readVarInt(r)
     stateID, _ := readVarInt(r)
-    slot, _ := readU8(r)
+    
+    var slot int16
+    binary.Read(r, binary.BigEndian, &slot)
+    
     item, _ := readSlot(r)
     
-    c.player.UpdateInventorySlot(int8(windowID), stateID, int8(slot), item)
+    if c.player != nil {
+        c.player.UpdateInventorySlot(int8(windowID), stateID, int8(slot), item)
+    }
     
+    return nil
+}
+
+func readSlot(r *bytes.Reader) (*SlotData, error) {
+    count, err := readVarIntFromReader(r)
+    if err != nil {
+        return nil, err
+    }
+    if count <= 0 {
+        return nil, nil
+    }
+    
+    itemID, err := readVarIntFromReader(r)
+    if err != nil {
+        return nil, nil
+    }
+    
+    // 跳过数据组件
+    if err := skipSlotComponents(r); err != nil {
+        return nil, err
+    }
+    
+    return &SlotData{ID: itemID, Count: count}, nil
+}
+
+func skipSlotComponents(r *bytes.Reader) error {
+    numAdd, err := readVarIntFromReader(r)
+    if err != nil {
+        return err
+    }
+    for i := int32(0); i < numAdd; i++ {
+        if err := skipComponentData(r); err != nil {
+            return err
+        }
+    }
+    
+    numRemove, err := readVarIntFromReader(r)
+    if err != nil {
+        return err
+    }
+    for i := int32(0); i < numRemove; i++ {
+        _, err := readVarIntFromReader(r)
+        if err != nil {
+            return err
+        }
+    }
     return nil
 }
 ```
