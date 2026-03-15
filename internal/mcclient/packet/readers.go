@@ -50,10 +50,13 @@ func ReadU8(r io.Reader) (byte, error) {
 	return b[0], nil
 }
 
-func ReadBytes(r io.Reader, n int) []byte {
+func ReadBytes(r io.Reader, n int) ([]byte, error) {
 	b := make([]byte, n)
-	_, _ = io.ReadFull(r, b)
-	return b
+	_, err := io.ReadFull(r, b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {

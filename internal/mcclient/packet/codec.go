@@ -162,8 +162,15 @@ func (c *PacketConn) compressBody(body []byte) []byte {
 	if len(body) >= c.CompressionThreshold {
 		var compressed bytes.Buffer
 		zw := zlib.NewWriter(&compressed)
-		_, _ = zw.Write(body)
-		_ = zw.Close()
+		if _, err := zw.Write(body); err != nil {
+			logx.Warnf("compress: zlib 写入失败: %v", err)
+			_ = zw.Close()
+			return append(EncodeVarInt(0), body...)
+		}
+		if err := zw.Close(); err != nil {
+			logx.Warnf("compress: zlib 关闭失败: %v", err)
+			return append(EncodeVarInt(0), body...)
+		}
 		return append(EncodeVarInt(int32(len(body))), compressed.Bytes()...)
 	}
 	return append(EncodeVarInt(0), body...)

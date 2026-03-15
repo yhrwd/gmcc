@@ -22,7 +22,11 @@ func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 	defer mu.Unlock()
 
 	debugEnabled = debug
-	_ = closeLocked()
+	if err := closeLocked(); err != nil {
+		if consoleLogger != nil {
+			consoleLogger.Printf("[WARN] 关闭旧日志失败: %v", err)
+		}
+	}
 
 	consoleLogger = log.New(os.Stdout, "", 0)
 	consoleLogger.SetOutput(os.Stdout)

@@ -144,7 +144,10 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 		}
 	}
 
-	carriedItem, _ := packet.ReadSlotData(r)
+	carriedItem, err := packet.ReadSlotData(r)
+	if err != nil {
+		logx.Warnf("container_content: 读取 carriedItem 失败: %v", err)
+	}
 	var carried *player.SlotData
 	if carriedItem != nil {
 		carried = &player.SlotData{ID: carriedItem.ID, Count: carriedItem.Count}

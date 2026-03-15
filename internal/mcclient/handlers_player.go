@@ -17,12 +17,22 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 	}
 
 	var health float32
-	binary.Read(r, binary.BigEndian, &health)
+	if err := binary.Read(r, binary.BigEndian, &health); err != nil {
+		logx.Warnf("set_health: 读取 health 失败: %v", err)
+		return nil
+	}
 
-	food, _ := packet.ReadVarIntFromReader(r)
+	food, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		logx.Warnf("set_health: 读取 food 失败: %v", err)
+		return nil
+	}
 
 	var saturation float32
-	binary.Read(r, binary.BigEndian, &saturation)
+	if err := binary.Read(r, binary.BigEndian, &saturation); err != nil {
+		logx.Warnf("set_health: 读取 saturation 失败: %v", err)
+		return nil
+	}
 
 	c.Player.UpdateHealth(health, 0, int32(food), saturation)
 	return nil
@@ -35,9 +45,22 @@ func (c *Client) handleSetExperiencePacket(data []byte) error {
 	}
 
 	var expBar float32
-	binary.Read(r, binary.BigEndian, &expBar)
-	level, _ := packet.ReadVarIntFromReader(r)
-	totalExp, _ := packet.ReadVarIntFromReader(r)
+	if err := binary.Read(r, binary.BigEndian, &expBar); err != nil {
+		logx.Warnf("set_experience: 读取 exp_bar 失败: %v", err)
+		return nil
+	}
+
+	level, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		logx.Warnf("set_experience: 读取 level 失败: %v", err)
+		return nil
+	}
+
+	totalExp, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		logx.Warnf("set_experience: 读取 total_exp 失败: %v", err)
+		return nil
+	}
 
 	c.Player.UpdateExperience(int32(level), expBar, float32(totalExp))
 	return nil
@@ -59,9 +82,17 @@ func (c *Client) handleGameEventPacket(data []byte) error {
 		return nil
 	}
 
-	eventType, _ := packet.ReadU8(r)
+	eventType, err := packet.ReadU8(r)
+	if err != nil {
+		logx.Warnf("game_event: 读取 event_type 失败: %v", err)
+		return nil
+	}
+
 	var value float32
-	binary.Read(r, binary.BigEndian, &value)
+	if err := binary.Read(r, binary.BigEndian, &value); err != nil {
+		logx.Warnf("game_event: 读取 value 失败: %v", err)
+		return nil
+	}
 
 	if eventType == 3 && value >= 0 && value <= 3 {
 		mode := player.GameMode(int(value))
@@ -153,7 +184,9 @@ func (c *Client) readLoginPlayerState(r *bytes.Reader) error {
 	c.Player.SetDimension(dimensionName)
 
 	var hashedSeed int64
-	binary.Read(r, binary.BigEndian, &hashedSeed)
+	if err := binary.Read(r, binary.BigEndian, &hashedSeed); err != nil {
+		logx.Debugf("read_login_player_state: 跳过 hashed_seed: %v", err)
+	}
 
 	gameMode, err := packet.ReadU8(r)
 	if err != nil {
@@ -161,9 +194,15 @@ func (c *Client) readLoginPlayerState(r *bytes.Reader) error {
 	}
 	c.Player.SetGameMode(player.GameMode(int(gameMode)))
 
-	_, _ = packet.ReadU8(r)             // prevGameMode
-	_, _ = packet.ReadBoolFromReader(r) // isDebug
-	_, _ = packet.ReadBoolFromReader(r) // isFlat
+	if _, err := packet.ReadU8(r); err != nil {
+		logx.Debugf("read_login_player_state: 跳过 prev_game_mode: %v", err)
+	}
+	if _, err := packet.ReadBoolFromReader(r); err != nil {
+		logx.Debugf("read_login_player_state: 跳过 is_debug: %v", err)
+	}
+	if _, err := packet.ReadBoolFromReader(r); err != nil {
+		logx.Debugf("read_login_player_state: 跳过 is_flat: %v", err)
+	}
 	return nil
 }
 
@@ -177,15 +216,23 @@ func (c *Client) readLoginDeathLocation(r *bytes.Reader) error {
 			return fmt.Errorf("读取 death_dimension 失败: %w", err)
 		}
 		var deathPos int64
-		binary.Read(r, binary.BigEndian, &deathPos)
+		if err := binary.Read(r, binary.BigEndian, &deathPos); err != nil {
+			logx.Debugf("read_login_death_location: 跳过 death_pos: %v", err)
+		}
 	}
 	return nil
 }
 
 func (c *Client) readLoginMisc(r *bytes.Reader) error {
-	_, _ = packet.ReadVarIntFromReader(r) // portalCooldown
-	_, _ = packet.ReadVarIntFromReader(r) // seaLevel
-	_, _ = packet.ReadBoolFromReader(r)   // secureChatEnforced
+	if _, err := packet.ReadVarIntFromReader(r); err != nil {
+		logx.Debugf("read_login_misc: 跳过 portal_cooldown: %v", err)
+	}
+	if _, err := packet.ReadVarIntFromReader(r); err != nil {
+		logx.Debugf("read_login_misc: 跳过 sea_level: %v", err)
+	}
+	if _, err := packet.ReadBoolFromReader(r); err != nil {
+		logx.Debugf("read_login_misc: 跳过 secure_chat_enforced: %v", err)
+	}
 	return nil
 }
 
@@ -205,7 +252,7 @@ func (c *Client) handleEntityDataPacket(data []byte) error {
 		if err != nil {
 			break
 		}
-		_ = typeID
+		logx.Debugf("entity_data: index=%d, type_id=%d (skipped)", index, typeID)
 		break
 	}
 	return nil

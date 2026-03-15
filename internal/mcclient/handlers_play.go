@@ -48,18 +48,48 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 			return fmt.Errorf("读取 player_position teleport id 失败: %w", err)
 		}
 
-		x, _ := packet.ReadFloat64FromReader(r)
-		y, _ := packet.ReadFloat64FromReader(r)
-		z, _ := packet.ReadFloat64FromReader(r)
+		x, err := packet.ReadFloat64FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position x 失败: %w", err)
+		}
+		y, err := packet.ReadFloat64FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position y 失败: %w", err)
+		}
+		z, err := packet.ReadFloat64FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position z 失败: %w", err)
+		}
 
-		deltaX, _ := packet.ReadFloat64FromReader(r)
-		deltaY, _ := packet.ReadFloat64FromReader(r)
-		deltaZ, _ := packet.ReadFloat64FromReader(r)
+		deltaX, err := packet.ReadFloat64FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position deltaX 失败: %w", err)
+		}
+		deltaY, err := packet.ReadFloat64FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position deltaY 失败: %w", err)
+		}
+		deltaZ, err := packet.ReadFloat64FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position deltaZ 失败: %w", err)
+		}
 
-		yRot := packet.ReadFloat32FromBytes(packet.ReadBytes(r, 4))
-		xRot := packet.ReadFloat32FromBytes(packet.ReadBytes(r, 4))
+		yRotBytes, err := packet.ReadBytes(r, 4)
+		if err != nil {
+			return fmt.Errorf("读取 player_position yRot 失败: %w", err)
+		}
+		yRot := packet.ReadFloat32FromBytes(yRotBytes)
 
-		relBits, _ := packet.ReadInt32FromReader(r)
+		xRotBytes, err := packet.ReadBytes(r, 4)
+		if err != nil {
+			return fmt.Errorf("读取 player_position xRot 失败: %w", err)
+		}
+		xRot := packet.ReadFloat32FromBytes(xRotBytes)
+
+		relBits, err := packet.ReadInt32FromReader(r)
+		if err != nil {
+			return fmt.Errorf("读取 player_position relBits 失败: %w", err)
+		}
 
 		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x",
 			teleportID, x, y, z, yRot, xRot, relBits)
