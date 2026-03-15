@@ -73,8 +73,8 @@ func (r *ItemRegistry) IDToName(id int32) string {
 
 func (r *ItemRegistry) LocalizedName(id int32) string {
 	if item := r.GetByID(id); item != nil {
-		translated := i18n.ItemName(item.Name)
-		if translated != "item.minecraft."+item.Name && translated != "block.minecraft."+item.Name {
+		translated, ok := i18n.GetI18n().ItemName(item.Name)
+		if ok {
 			return translated
 		}
 		return item.DisplayName

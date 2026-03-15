@@ -106,11 +106,16 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		logx.Warnf("container_content: 读取 windowID 失败: %v", err)
-		return nil
+		return err
 	}
-	stateID, _ := packet.ReadVarIntFromReader(r)
-	numItems, _ := packet.ReadVarIntFromReader(r)
+	stateID, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	numItems, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
 
 	c.Player.UpdateContainerStateID(stateID)
 
@@ -153,11 +158,19 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 
 func (c *Client) handleContainerSlotPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	windowID, _ := packet.ReadVarIntFromReader(r)
-	stateID, _ := packet.ReadVarIntFromReader(r)
+	windowID, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	stateID, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
 
 	var slot int16
-	binary.Read(r, binary.BigEndian, &slot)
+	if err := binary.Read(r, binary.BigEndian, &slot); err != nil {
+		return err
+	}
 
 	c.Player.UpdateContainerStateID(stateID)
 

@@ -118,19 +118,20 @@ func (c *TextComponent) render(sb *strings.Builder, parent *Style) {
 	}
 
 	if c.Translate != "" {
-		template := i18n.Translate(c.Translate)
-		if template == c.Translate {
-			template = "[" + c.Translate + "]"
+		if len(c.With) > 0 {
+			args := make([]any, len(c.With))
+			for idx, w := range c.With {
+				args[idx] = w.ToPlain()
+			}
+			sb.WriteString(i18n.Translate(c.Translate, args...))
 		} else {
-			if len(c.With) > 0 {
-				args := make([]any, len(c.With))
-				for idx, w := range c.With {
-					args[idx] = w.ToPlain()
-				}
-				template = i18n.Translate(c.Translate, args...)
+			template := i18n.Translate(c.Translate)
+			if template == c.Translate {
+				sb.WriteString("[" + c.Translate + "]")
+			} else {
+				sb.WriteString(template)
 			}
 		}
-		sb.WriteString(template)
 	}
 
 	for i := range c.Extra {
@@ -342,20 +343,21 @@ func (c *TextComponent) ToPlain() string {
 func (c *TextComponent) renderPlain(sb *strings.Builder) {
 	sb.WriteString(c.Text)
 	if c.Translate != "" {
-		template := i18n.Translate(c.Translate)
-		if template == c.Translate {
-			sb.WriteString("[")
-			sb.WriteString(c.Translate)
-			sb.WriteString("]")
-		} else {
-			if len(c.With) > 0 {
-				args := make([]any, len(c.With))
-				for idx, w := range c.With {
-					args[idx] = w.ToPlain()
-				}
-				template = i18n.Translate(c.Translate, args...)
+		if len(c.With) > 0 {
+			args := make([]any, len(c.With))
+			for idx, w := range c.With {
+				args[idx] = w.ToPlain()
 			}
-			sb.WriteString(template)
+			sb.WriteString(i18n.Translate(c.Translate, args...))
+		} else {
+			template := i18n.Translate(c.Translate)
+			if template == c.Translate {
+				sb.WriteString("[")
+				sb.WriteString(c.Translate)
+				sb.WriteString("]")
+			} else {
+				sb.WriteString(template)
+			}
 		}
 	}
 	for _, extra := range c.Extra {
