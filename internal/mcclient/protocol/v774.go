@@ -74,6 +74,7 @@ const (
 	PlayClientContainerContent int32 = 0x12
 	PlayClientContainerSetData int32 = 0x13
 	PlayClientContainerSlot    int32 = 0x14
+	PlayClientPlayerAbilities  int32 = 0x3E
 	PlayClientEntityData       int32 = 0x5D
 	PlayClientGameEvent        int32 = 0x22
 
@@ -164,6 +165,7 @@ var PlayClientPacketNames = map[int32]string{
 	PlayClientContainerContent: "container_set_content",
 	PlayClientContainerSetData: "container_set_data",
 	PlayClientContainerSlot:    "container_set_slot",
+	PlayClientPlayerAbilities:  "player_abilities",
 	PlayClientEntityData:       "entity_data",
 	PlayClientGameEvent:        "game_event",
 }

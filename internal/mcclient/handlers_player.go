@@ -281,3 +281,36 @@ func (c *Client) handleContainerSlotPacket(data []byte) error {
 	c.Player.UpdateSlot(windowID, int32(slot), slotItem)
 	return nil
 }
+
+func (c *Client) handlePlayerAbilitiesPacket(data []byte) error {
+	r := bytes.NewReader(data)
+
+	flags, err := packet.ReadU8(r)
+	if err != nil {
+		logx.Warnf("player_abilities: 读取 flags 失败: %v", err)
+		return nil
+	}
+
+	flyingSpeed, err := packet.ReadFloat32FromReader(r)
+	if err != nil {
+		logx.Warnf("player_abilities: 读取 flying_speed 失败: %v", err)
+		return nil
+	}
+
+	fov, err := packet.ReadFloat32FromReader(r)
+	if err != nil {
+		logx.Warnf("player_abilities: 读取 fov 失败: %v", err)
+		return nil
+	}
+
+	invulnerable := (flags & 0x01) != 0
+	flying := (flags & 0x02) != 0
+	canFly := (flags & 0x04) != 0
+	instantBreak := (flags & 0x08) != 0
+
+	c.Player.UpdateAbilities(int8(flags), flyingSpeed, fov)
+
+	logx.Infof("player_abilities: invulnerable=%v, flying=%v, can_fly=%v, instant_break=%v, speed=%.2f, fov=%.2f",
+		invulnerable, flying, canFly, instantBreak, flyingSpeed, fov)
+	return nil
+}
