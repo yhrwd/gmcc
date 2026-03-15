@@ -13,6 +13,7 @@ import (
 func (c *Client) handleSetHealthPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	if r.Len() < 12 {
+		logx.Warnf("set_health: 数据过短: %d bytes", r.Len())
 		return nil
 	}
 
@@ -41,6 +42,7 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 func (c *Client) handleSetExperiencePacket(data []byte) error {
 	r := bytes.NewReader(data)
 	if r.Len() < 9 {
+		logx.Warnf("set_experience: 数据过短: %d bytes", r.Len())
 		return nil
 	}
 
@@ -70,6 +72,7 @@ func (c *Client) handleSetHeldSlotPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	slot, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
+		logx.Warnf("set_held_slot: 读取 slot 失败: %v", err)
 		return nil
 	}
 	c.Player.SetHeldSlot(int8(slot))
@@ -79,6 +82,7 @@ func (c *Client) handleSetHeldSlotPacket(data []byte) error {
 func (c *Client) handleGameEventPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	if r.Len() < 5 {
+		logx.Warnf("game_event: 数据过短: %d bytes", r.Len())
 		return nil
 	}
 

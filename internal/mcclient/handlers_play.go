@@ -45,50 +45,60 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 
 		teleportID, err := packet.ReadVarInt(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position teleport id 失败: %w", err)
+			logx.Warnf("player_position: 读取 teleportID 失败: %v", err)
+			return nil
 		}
 
 		x, err := packet.ReadFloat64FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position x 失败: %w", err)
+			logx.Warnf("player_position: 读取 x 失败: %v", err)
+			return nil
 		}
 		y, err := packet.ReadFloat64FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position y 失败: %w", err)
+			logx.Warnf("player_position: 读取 y 失败: %v", err)
+			return nil
 		}
 		z, err := packet.ReadFloat64FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position z 失败: %w", err)
+			logx.Warnf("player_position: 读取 z 失败: %v", err)
+			return nil
 		}
 
 		deltaX, err := packet.ReadFloat64FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position deltaX 失败: %w", err)
+			logx.Warnf("player_position: 读取 deltaX 失败: %v", err)
+			return nil
 		}
 		deltaY, err := packet.ReadFloat64FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position deltaY 失败: %w", err)
+			logx.Warnf("player_position: 读取 deltaY 失败: %v", err)
+			return nil
 		}
 		deltaZ, err := packet.ReadFloat64FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position deltaZ 失败: %w", err)
+			logx.Warnf("player_position: 读取 deltaZ 失败: %v", err)
+			return nil
 		}
 
 		yRotBytes, err := packet.ReadBytes(r, 4)
 		if err != nil {
-			return fmt.Errorf("读取 player_position yRot 失败: %w", err)
+			logx.Warnf("player_position: 读取 yRot 失败: %v", err)
+			return nil
 		}
 		yRot := packet.ReadFloat32FromBytes(yRotBytes)
 
 		xRotBytes, err := packet.ReadBytes(r, 4)
 		if err != nil {
-			return fmt.Errorf("读取 player_position xRot 失败: %w", err)
+			logx.Warnf("player_position: 读取 xRot 失败: %v", err)
+			return nil
 		}
 		xRot := packet.ReadFloat32FromBytes(xRotBytes)
 
 		relBits, err := packet.ReadInt32FromReader(r)
 		if err != nil {
-			return fmt.Errorf("读取 player_position relBits 失败: %w", err)
+			logx.Warnf("player_position: 读取 relBits 失败: %v", err)
+			return nil
 		}
 
 		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x",

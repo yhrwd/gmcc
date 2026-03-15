@@ -46,15 +46,18 @@ func (c *Client) handleOpenScreenPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("open_screen: 读取 windowID 失败: %v", err)
+		return nil
 	}
 	windowType, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("open_screen: 读取 windowType 失败: %v", err)
+		return nil
 	}
 	title, err := c.readAnonymousNBTJSON(r)
 	if err != nil {
-		return err
+		logx.Warnf("open_screen: 读取 title 失败: %v", err)
+		return nil
 	}
 
 	c.Player.SetOpenContainer(&player.ContainerState{
@@ -71,7 +74,8 @@ func (c *Client) handleContainerClosePacket(data []byte) error {
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_close: 读取 windowID 失败: %v", err)
+		return nil
 	}
 
 	container := c.Player.GetOpenContainer()
@@ -87,15 +91,18 @@ func (c *Client) handleContainerSetDataPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_set_data: 读取 windowID 失败: %v", err)
+		return nil
 	}
 	property, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_set_data: 读取 property 失败: %v", err)
+		return nil
 	}
 	value, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_set_data: 读取 value 失败: %v", err)
+		return nil
 	}
 
 	logx.Debugf("container_set_data: windowID=%d, property=%d, value=%d", windowID, property, value)
@@ -106,15 +113,18 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_content: 读取 windowID 失败: %v", err)
+		return nil
 	}
 	stateID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_content: 读取 stateID 失败: %v", err)
+		return nil
 	}
 	numItems, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_content: 读取 numItems 失败: %v", err)
+		return nil
 	}
 
 	c.Player.UpdateContainerStateID(stateID)
@@ -163,16 +173,19 @@ func (c *Client) handleContainerSlotPacket(data []byte) error {
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_slot: 读取 windowID 失败: %v", err)
+		return nil
 	}
 	stateID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		logx.Warnf("container_slot: 读取 stateID 失败: %v", err)
+		return nil
 	}
 
 	var slot int16
 	if err := binary.Read(r, binary.BigEndian, &slot); err != nil {
-		return err
+		logx.Warnf("container_slot: 读取 slot 失败: %v", err)
+		return nil
 	}
 
 	c.Player.UpdateContainerStateID(stateID)
