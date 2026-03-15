@@ -128,6 +128,15 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 	case protocol.PlayClientContainerSlot:
 		return c.handleContainerSlotPacket(pkt.Data)
 
+	case protocol.PlayClientContainerClose:
+		return c.handleContainerClosePacket(pkt.Data)
+
+	case protocol.PlayClientContainerSetData:
+		return c.handleContainerSetDataPacket(pkt.Data)
+
+	case protocol.PlayClientOpenScreen:
+		return c.handleOpenScreenPacket(pkt.Data)
+
 	case protocol.PlayClientPlayerAbilities:
 		return c.handlePlayerAbilitiesPacket(pkt.Data)
 

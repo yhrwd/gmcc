@@ -206,79 +206,8 @@ func (c *Client) handleEntityDataPacket(data []byte) error {
 			break
 		}
 		_ = typeID
-		// In a real client we'd parse the metadata here
-		// For now we just skip the packet if it's too complex or just ignore it
 		break
 	}
-	return nil
-}
-
-func (c *Client) handleContainerContentPacket(data []byte) error {
-	r := bytes.NewReader(data)
-	windowID, err := packet.ReadVarIntFromReader(r)
-	if err != nil {
-		logx.Warnf("container_content: 读取 windowID 失败: %v", err)
-		return nil
-	}
-	stateID, _ := packet.ReadVarIntFromReader(r)
-	numItems, _ := packet.ReadVarIntFromReader(r)
-
-	logx.Infof("container_content: windowID=%d, stateID=%d, numItems=%d, remaining=%d bytes", windowID, stateID, numItems, r.Len())
-
-	if numItems > 1000 {
-		logx.Warnf("container_content: numItems 过大 (%d), 限制为 1000", numItems)
-		numItems = 1000
-	}
-
-	items := make([]*player.SlotData, numItems)
-	for i := int32(0); i < numItems; i++ {
-		slot, err := packet.ReadSlotData(r)
-		if err != nil {
-			logx.Warnf("container_content: 读取 slot %d 失败: %v, 剩余 %d 字节", i, err, r.Len())
-			break
-		}
-		if slot != nil {
-			items[i] = &player.SlotData{ID: slot.ID, Count: slot.Count}
-			if i < 10 || slot.ID != 0 {
-				logx.Debugf("  slot[%d]: id=%d, count=%d", i, slot.ID, slot.Count)
-			}
-		}
-	}
-
-	carriedItem, _ := packet.ReadSlotData(r)
-	var carried *player.SlotData
-	if carriedItem != nil {
-		carried = &player.SlotData{ID: carriedItem.ID, Count: carriedItem.Count}
-		logx.Infof("container_content: carried item: id=%d, count=%d", carriedItem.ID, carriedItem.Count)
-	}
-
-	c.Player.UpdateInventory(windowID, items, carried)
-	return nil
-}
-
-func (c *Client) handleContainerSlotPacket(data []byte) error {
-	r := bytes.NewReader(data)
-	windowID, _ := packet.ReadVarIntFromReader(r)
-	stateID, _ := packet.ReadVarIntFromReader(r)
-
-	var slot int16
-	binary.Read(r, binary.BigEndian, &slot)
-
-	item, err := packet.ReadSlotData(r)
-	if err != nil {
-		logx.Warnf("container_slot: 读取物品数据失败: windowID=%d, slot=%d, err=%v", windowID, slot, err)
-		return nil
-	}
-
-	var slotItem *player.SlotData
-	if item != nil {
-		slotItem = &player.SlotData{ID: item.ID, Count: item.Count}
-		logx.Infof("container_slot: windowID=%d, stateID=%d, slot=%d, item_id=%d, count=%d", windowID, stateID, slot, item.ID, item.Count)
-	} else {
-		logx.Debugf("container_slot: windowID=%d, stateID=%d, slot=%d, item=empty", windowID, stateID, slot)
-	}
-
-	c.Player.UpdateSlot(windowID, int32(slot), slotItem)
 	return nil
 }
 

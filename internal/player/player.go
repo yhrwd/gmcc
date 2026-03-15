@@ -13,6 +13,13 @@ type SlotData struct {
 	Count int32
 }
 
+type ContainerState struct {
+	WindowID   int32
+	WindowType int32
+	StateID    int32
+	Open       bool
+}
+
 func (s *SlotData) IDToString() string {
 	if s == nil || s.ID == 0 {
 		return ""
@@ -57,8 +64,9 @@ type Player struct {
 	FlyingSpeed  float32
 	FieldOfView  float32
 
-	Inventory *Inventory
-	HeldSlot  int8
+	Inventory     *Inventory
+	HeldSlot      int8
+	OpenContainer *ContainerState
 
 	JoinTime   time.Time
 	LastUpdate time.Time
@@ -252,6 +260,26 @@ func (p *Player) GetHeldSlot() int8 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.HeldSlot
+}
+
+func (p *Player) SetOpenContainer(container *ContainerState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.OpenContainer = container
+}
+
+func (p *Player) GetOpenContainer() *ContainerState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.OpenContainer
+}
+
+func (p *Player) UpdateContainerStateID(stateID int32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.OpenContainer != nil {
+		p.OpenContainer.StateID = stateID
+	}
 }
 
 func (p *Player) GetHeldItem() *Item {

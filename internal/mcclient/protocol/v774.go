@@ -74,6 +74,7 @@ const (
 	PlayClientContainerContent int32 = 0x12
 	PlayClientContainerSetData int32 = 0x13
 	PlayClientContainerSlot    int32 = 0x14
+	PlayClientOpenScreen       int32 = 0x0D
 	PlayClientPlayerAbilities  int32 = 0x3E
 	PlayClientEntityData       int32 = 0x5D
 	PlayClientGameEvent        int32 = 0x22
@@ -85,6 +86,8 @@ const (
 	PlayServerChatSession     int32 = 0x09
 	PlayServerAcceptTeleport  int32 = 0x00
 	PlayServerClientInfo      int32 = 0x0D
+	PlayServerContainerClose  int32 = 0x0D
+	PlayServerContainerClick  int32 = 0x0E
 	PlayServerCookieResp      int32 = 0x14
 	PlayServerKeepAlive       int32 = 0x1B
 	PlayServerMoveStatus      int32 = 0x20
@@ -161,6 +164,7 @@ var PlayClientPacketNames = map[int32]string{
 	PlayClientPlayerInfoUpdate: "player_info_update",
 	PlayClientPlayerInfoRemove: "player_info_remove",
 	PlayClientSetHeldSlot:      "held_item_change",
+	PlayClientOpenScreen:       "open_screen",
 	PlayClientContainerClose:   "container_close",
 	PlayClientContainerContent: "container_set_content",
 	PlayClientContainerSetData: "container_set_data",
