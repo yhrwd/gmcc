@@ -14,12 +14,12 @@ var componentSkippers map[int32]componentSkipper
 
 func init() {
 	componentSkippers = map[int32]componentSkipper{
-		0:  SkipNBT,
-		1:  SkipVarInt,
+		0:  SkipVarInt,
+		1:  SkipBannerPatterns,
 		2:  SkipVarInt,
 		3:  SkipNBT,
 		4:  SkipNBT,
-		5:  SkipVarInt,
+		5:  SkipBlockState,
 		6:  SkipSoundEvent,
 		7:  SkipNBT,
 		8:  func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) },
@@ -60,9 +60,7 @@ func init() {
 		43: SkipString,
 		44: SkipVarInt,
 		45: SkipFloat32,
-		46: func(r *bytes.Reader) error {
-			return SkipPrefixedArray(r, func(r *bytes.Reader) error { return SkipVarInt(r) })
-		},
+		46: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipVarInt) },
 		47: SkipString,
 		48: SkipProvidesTrimMaterial,
 		49: SkipVarInt,
@@ -147,6 +145,26 @@ func SkipSoundEvent(r *bytes.Reader) error {
 		return SkipFloat32(r)
 	}
 	return nil
+}
+
+func SkipBannerPatterns(r *bytes.Reader) error {
+	return SkipPrefixedArray(r, func(r *bytes.Reader) error {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		_, err := ReadVarIntFromReader(r)
+		return err
+	})
+}
+
+func SkipBlockState(r *bytes.Reader) error {
+	return SkipPrefixedArray(r, func(r *bytes.Reader) error {
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+		_, err := ReadStringFromReader(r)
+		return err
+	})
 }
 
 func SkipFireworks(r *bytes.Reader) error {
@@ -321,7 +339,7 @@ func SkipDeathProtection(r *bytes.Reader) error {
 			_, err := ReadVarIntFromReader(r)
 			return err
 		case 1:
-			return SkipPrefixedArray(r, SkipDeathProtection)
+			return SkipDeathProtection(r)
 		case 2:
 			_, err := ReadVarIntFromReader(r)
 			return err

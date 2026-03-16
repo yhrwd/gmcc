@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"gmcc/internal/logx"
 	"gmcc/internal/nbt"
 )
 
@@ -58,20 +59,28 @@ func ReadBytes(r io.Reader, n int) []byte {
 }
 
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
+	startPos := r.Len()
+
+	// 物品ID: VarInt, 0 表示空槽
+	itemID, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return nil, err
+	}
+	if itemID == 0 {
+		return nil, nil
+	}
+
+	// 数量: VarInt
 	count, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
-	if count <= 0 {
-		return nil, nil
-	}
 
-	itemID, err := ReadVarIntFromReader(r)
-	if err != nil {
-		return nil, nil
-	}
-
+	// 组件数据
 	if err := SkipSlotComponents(r); err != nil {
+		remaining := r.Len()
+		logx.Warnf("Slot解析失败: itemID=%d, count=%d, startPos=%d, remaining=%d, err=%v",
+			itemID, count, startPos, remaining, err)
 		return nil, err
 	}
 
