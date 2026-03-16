@@ -41,7 +41,11 @@ func CollectChatText(node any, parts *[]string) {
 			}
 		}
 		if tr, ok := v["translate"].(string); ok {
-			*parts = append(*parts, "["+tr+"]")
+			if fallback, ok := v["fallback"].(string); ok && strings.TrimSpace(fallback) != "" {
+				*parts = append(*parts, fallback)
+			} else {
+				*parts = append(*parts, "["+tr+"]")
+			}
 		}
 		if selector, ok := v["selector"].(string); ok {
 			if strings.TrimSpace(selector) != "" {

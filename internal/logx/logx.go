@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,11 +23,7 @@ func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 	defer mu.Unlock()
 
 	debugEnabled = debug
-	if err := closeLocked(); err != nil {
-		if consoleLogger != nil {
-			consoleLogger.Printf("[WARN] 关闭旧日志失败: %v", err)
-		}
-	}
+	_ = closeLocked()
 
 	consoleLogger = log.New(os.Stdout, "", 0)
 	consoleLogger.SetOutput(os.Stdout)
@@ -85,6 +82,46 @@ func Debugf(format string, args ...interface{}) {
 }
 
 func PacketLogf(format string, args ...interface{}) {
+}
+
+func PacketError(packetName string, data []byte, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if fileLogger != nil {
+		now := time.Now()
+		consoleLogger.Printf("%s [ERROR] Packet解析失败: %s: %v, len=%d", now.Format("15:04:05"), packetName, err, len(data))
+		fileLogger.Printf("[ERROR] Packet解析失败: %s: %v, len=%d", packetName, err, len(data))
+	}
+	if len(data) > 0 {
+		savePacketDump(packetName, data, err)
+	}
+}
+
+func savePacketDump(packetName string, data []byte, err error) {
+	if fileWriter == nil {
+		return
+	}
+	dumpDir := filepath.Join(filepath.Dir(fileWriter.activePath), "errors")
+	if err := os.MkdirAll(dumpDir, 0o755); err != nil {
+		return
+	}
+	timestamp := time.Now().Format("20060102-150405")
+	safeName := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_").Replace(packetName)
+	filename := fmt.Sprintf("%s_%s.bin", timestamp, safeName)
+	path := filepath.Join(dumpDir, filename)
+
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	fmt.Fprintf(f, "# Packet: %s\n", packetName)
+	fmt.Fprintf(f, "# Error: %v\n", err)
+	fmt.Fprintf(f, "# Length: %d bytes\n", len(data))
+	fmt.Fprintf(f, "# Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintln(f, "# --- HEX DUMP ---")
+	f.Write(data)
 }
 
 func closeLocked() error {

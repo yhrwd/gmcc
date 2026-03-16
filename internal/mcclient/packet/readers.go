@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 
 	"gmcc/internal/nbt"
@@ -50,13 +51,10 @@ func ReadU8(r io.Reader) (byte, error) {
 	return b[0], nil
 }
 
-func ReadBytes(r io.Reader, n int) ([]byte, error) {
+func ReadBytes(r io.Reader, n int) []byte {
 	b := make([]byte, n)
-	_, err := io.ReadFull(r, b)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
+	_, _ = io.ReadFull(r, b)
+	return b
 }
 
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
@@ -108,7 +106,10 @@ func SkipComponentData(r *bytes.Reader) error {
 	if err != nil {
 		return err
 	}
-	return SkipComponentByType(r, componentType)
+	if err := SkipComponentByType(r, componentType); err != nil {
+		return fmt.Errorf("component type %d: %w", componentType, err)
+	}
+	return nil
 }
 
 func SkipNBT(r *bytes.Reader) error {

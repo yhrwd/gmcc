@@ -45,61 +45,21 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 
 		teleportID, err := packet.ReadVarInt(r)
 		if err != nil {
-			logx.Warnf("player_position: 读取 teleportID 失败: %v", err)
-			return nil
+			return fmt.Errorf("读取 player_position teleport id 失败: %w", err)
 		}
 
-		x, err := packet.ReadFloat64FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 x 失败: %v", err)
-			return nil
-		}
-		y, err := packet.ReadFloat64FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 y 失败: %v", err)
-			return nil
-		}
-		z, err := packet.ReadFloat64FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 z 失败: %v", err)
-			return nil
-		}
+		x, _ := packet.ReadFloat64FromReader(r)
+		y, _ := packet.ReadFloat64FromReader(r)
+		z, _ := packet.ReadFloat64FromReader(r)
 
-		deltaX, err := packet.ReadFloat64FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 deltaX 失败: %v", err)
-			return nil
-		}
-		deltaY, err := packet.ReadFloat64FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 deltaY 失败: %v", err)
-			return nil
-		}
-		deltaZ, err := packet.ReadFloat64FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 deltaZ 失败: %v", err)
-			return nil
-		}
+		deltaX, _ := packet.ReadFloat64FromReader(r)
+		deltaY, _ := packet.ReadFloat64FromReader(r)
+		deltaZ, _ := packet.ReadFloat64FromReader(r)
 
-		yRotBytes, err := packet.ReadBytes(r, 4)
-		if err != nil {
-			logx.Warnf("player_position: 读取 yRot 失败: %v", err)
-			return nil
-		}
-		yRot := packet.ReadFloat32FromBytes(yRotBytes)
+		yRot := packet.ReadFloat32FromBytes(packet.ReadBytes(r, 4))
+		xRot := packet.ReadFloat32FromBytes(packet.ReadBytes(r, 4))
 
-		xRotBytes, err := packet.ReadBytes(r, 4)
-		if err != nil {
-			logx.Warnf("player_position: 读取 xRot 失败: %v", err)
-			return nil
-		}
-		xRot := packet.ReadFloat32FromBytes(xRotBytes)
-
-		relBits, err := packet.ReadInt32FromReader(r)
-		if err != nil {
-			logx.Warnf("player_position: 读取 relBits 失败: %v", err)
-			return nil
-		}
+		relBits, _ := packet.ReadInt32FromReader(r)
 
 		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x",
 			teleportID, x, y, z, yRot, xRot, relBits)

@@ -153,9 +153,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 		default:
 		}
 
-		if err := c.conn.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-			logx.Debugf("设置读取超时失败: %v", err)
-		}
+		_ = c.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		pkt, err := c.conn.ReadPacket()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {

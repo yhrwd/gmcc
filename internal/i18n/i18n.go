@@ -78,32 +78,23 @@ func (i *I18n) format(template string, args ...any) string {
 
 	result := template
 	for idx, arg := range args {
-		argStr := formatArg(arg)
-
-		posKey := "%" + itoa(int64(idx+1)) + "$s"
-		if strings.Contains(result, posKey) {
-			result = strings.ReplaceAll(result, posKey, argStr)
+		old := result
+		key := "%" + string(rune('1'+idx))
+		if strings.Contains(result, key) {
+			result = strings.ReplaceAll(result, key, formatArg(arg))
 			continue
 		}
-
-		simpleKey := "%" + itoa(int64(idx+1))
-		if strings.Contains(result, simpleKey) {
-			result = strings.ReplaceAll(result, simpleKey, argStr)
+		key = "%" + string(rune('0'+idx+1))
+		if strings.Contains(result, key) {
+			result = strings.ReplaceAll(result, key, formatArg(arg))
 			continue
 		}
-	}
-
-	if strings.Contains(result, "%s") {
-		for _, arg := range args {
-			result = strings.Replace(result, "%s", formatArg(arg), 1)
+		if strings.Contains(old, "%s") {
+			result = strings.Replace(old, "%s", formatArg(arg), 1)
+		} else if strings.Contains(old, "%d") {
+			result = strings.Replace(old, "%d", formatArg(arg), 1)
 		}
 	}
-	if strings.Contains(result, "%d") {
-		for _, arg := range args {
-			result = strings.Replace(result, "%d", formatArg(arg), 1)
-		}
-	}
-
 	return result
 }
 
@@ -231,21 +222,7 @@ func TranslateWithFallback(key string, fallback string, args ...any) string {
 	return GetI18n().TranslateWithFallback(key, fallback, args...)
 }
 
-func (i *I18n) ItemName(name string) (string, bool) {
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	key := "item.minecraft." + name
-	if msg, ok := i.messages[key]; ok {
-		return i.format(msg), true
-	}
-	key = "block.minecraft." + name
-	if msg, ok := i.messages[key]; ok {
-		return i.format(msg), true
-	}
-	return name, false
-}
-
-func (i *I18n) ItemNameSimple(name string) string {
+func (i *I18n) ItemName(name string) string {
 	key := "item.minecraft." + name
 	if msg := i.Translate(key); msg != key {
 		return msg
@@ -271,7 +248,7 @@ func (i *I18n) EnchantmentName(name string) string {
 }
 
 func ItemName(name string) string {
-	return GetI18n().ItemNameSimple(name)
+	return GetI18n().ItemName(name)
 }
 
 func BlockName(name string) string {
