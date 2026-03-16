@@ -63,7 +63,7 @@ func ReadBytes(r io.Reader, n int) []byte {
 // 1. 新格式 (1.21+): count(VarInt) -> item_id(VarInt) -> components
 // 2. 旧格式 (1.20.5-): present(bool) -> item_id(VarInt) -> count(byte) -> nbt
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
-	// 先尝试读取第一个字节来判断格式
+	// 先读取第一个字节来判断格式
 	firstByte, err := r.ReadByte()
 	if err != nil {
 		return nil, err
@@ -72,61 +72,63 @@ func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
 		return nil, err
 	}
 
-	// 如果第一个字节的最高位为0（小于0x80），可能是新格式的count
-	// 否则可能是旧格式的present(bool)
-	if firstByte < 0x80 {
-		// 尝试新格式: count(VarInt)
-		count, err := ReadVarIntFromReader(r)
+	// 旧格式: 第一个字节是 0x00 (空) 或 0x01 (有物品)
+	// 新格式: 第一个字节是 count (通常 >= 2，因为数量为1时是0x01，但VarInt编码后不同)
+	// 关键判断: 旧格式present是0或1，新格式count是VarInt
+	// 如果第一个字节是0或1，很可能是旧格式
+	if firstByte == 0x00 || firstByte == 0x01 {
+		// 旧格式: present(bool) -> item_id(VarInt) -> count(byte) -> nbt
+		present, err := ReadBoolFromReader(r)
 		if err != nil {
 			return nil, err
 		}
-		if count == 0 {
-			return nil, nil // 空物品
+		if !present {
+			return nil, nil
 		}
 
-		// 读取item_id
+		// item_id
 		itemID, err := ReadVarIntFromReader(r)
 		if err != nil {
 			return nil, err
 		}
 
-		// 跳过components
-		if err := SkipSlotComponents(r); err != nil {
-			logx.Warnf("Slot解析失败(新格式): itemID=%d, count=%d, err=%v", itemID, count, err)
+		// count (byte)
+		countByte, err := ReadU8(r)
+		if err != nil {
 			return nil, err
 		}
 
-		return &SlotData{ID: itemID, Count: count}, nil
+		// 旧格式的NBT数据 - 使用NetworkFormat跳过
+		if err := SkipNBT(r); err != nil {
+			logx.Warnf("Slot解析失败(旧格式): itemID=%d, count=%d, err=%v", itemID, countByte, err)
+			return nil, err
+		}
+
+		return &SlotData{ID: itemID, Count: int32(countByte)}, nil
 	}
 
-	// 旧格式: present(bool) -> item_id(VarInt) -> count(byte) -> nbt
-	present, err := ReadBoolFromReader(r)
+	// 新格式: count(VarInt)
+	count, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
-	if !present {
-		return nil, nil
+	if count == 0 {
+		return nil, nil // 空物品
 	}
 
-	// item_id
+	// 读取item_id
 	itemID, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
 
-	// count (byte)
-	countByte, err := ReadU8(r)
-	if err != nil {
+	// 跳过components
+	if err := SkipSlotComponents(r); err != nil {
+		logx.Warnf("Slot解析失败(新格式): itemID=%d, count=%d, err=%v", itemID, count, err)
 		return nil, err
 	}
 
-	// 旧格式的NBT数据 - 使用NetworkFormat跳过
-	if err := SkipNBT(r); err != nil {
-		logx.Warnf("Slot解析失败(旧格式): itemID=%d, count=%d, err=%v", itemID, countByte, err)
-		return nil, err
-	}
-
-	return &SlotData{ID: itemID, Count: int32(countByte)}, nil
+	return &SlotData{ID: itemID, Count: count}, nil
 }
 
 // SkipSlotComponents 跳过物品组件
