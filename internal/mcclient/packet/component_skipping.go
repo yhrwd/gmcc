@@ -3,7 +3,6 @@ package packet
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 
 	"gmcc/internal/logx"
 )
@@ -93,8 +92,9 @@ func SkipComponentByType(r *bytes.Reader, componentType int32) error {
 	if skipper, ok := componentSkippers[componentType]; ok {
 		return skipper(r)
 	}
-	logx.Warnf("未知的组件类型: %d, 尝试跳过剩余数据", componentType)
-	return fmt.Errorf("unknown component type %d", componentType)
+	// 未知组件：尝试跳过为NBT（常见情况）
+	logx.Warnf("未知组件类型: %d, 尝试NBT跳过", componentType)
+	return SkipNBT(r)
 }
 
 func SkipNothing(r *bytes.Reader) error {

@@ -58,56 +58,10 @@ func ReadBytes(r io.Reader, n int) []byte {
 	return b
 }
 
-// ReadSlotData 解析 ItemStack 格式
-// 支持两种格式:
-// 1. 新格式 (1.21+): count(VarInt) -> item_id(VarInt) -> components
-// 2. 旧格式 (1.20.5-): present(bool) -> item_id(VarInt) -> count(byte) -> nbt
+// ReadSlotData 解析 1.21+ ItemStack 格式
+// 结构: count(VarInt) -> [如果count>0] item_id(VarInt) -> components
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
-	// 先读取第一个字节来判断格式
-	firstByte, err := r.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-	if err := r.UnreadByte(); err != nil {
-		return nil, err
-	}
-
-	// 旧格式: 第一个字节是 0x00 (空) 或 0x01 (有物品)
-	// 新格式: 第一个字节是 count (通常 >= 2，因为数量为1时是0x01，但VarInt编码后不同)
-	// 关键判断: 旧格式present是0或1，新格式count是VarInt
-	// 如果第一个字节是0或1，很可能是旧格式
-	if firstByte == 0x00 || firstByte == 0x01 {
-		// 旧格式: present(bool) -> item_id(VarInt) -> count(byte) -> nbt
-		present, err := ReadBoolFromReader(r)
-		if err != nil {
-			return nil, err
-		}
-		if !present {
-			return nil, nil
-		}
-
-		// item_id
-		itemID, err := ReadVarIntFromReader(r)
-		if err != nil {
-			return nil, err
-		}
-
-		// count (byte)
-		countByte, err := ReadU8(r)
-		if err != nil {
-			return nil, err
-		}
-
-		// 旧格式的NBT数据 - 使用NetworkFormat跳过
-		if err := SkipNBT(r); err != nil {
-			logx.Warnf("Slot解析失败(旧格式): itemID=%d, count=%d, err=%v", itemID, countByte, err)
-			return nil, err
-		}
-
-		return &SlotData{ID: itemID, Count: int32(countByte)}, nil
-	}
-
-	// 新格式: count(VarInt)
+	// 1. item_count (VarInt)
 	count, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
@@ -116,15 +70,15 @@ func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
 		return nil, nil // 空物品
 	}
 
-	// 读取item_id
+	// 2. item_id (VarInt)
 	itemID, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
 
-	// 跳过components
+	// 3. 跳过components
 	if err := SkipSlotComponents(r); err != nil {
-		logx.Warnf("Slot解析失败(新格式): itemID=%d, count=%d, err=%v", itemID, count, err)
+		logx.Warnf("Slot解析失败: itemID=%d, count=%d, err=%v", itemID, count, err)
 		return nil, err
 	}
 
