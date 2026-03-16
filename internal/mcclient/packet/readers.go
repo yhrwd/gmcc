@@ -58,16 +58,16 @@ func ReadBytes(r io.Reader, n int) []byte {
 	return b
 }
 
-// ReadSlotData 解析 1.20.5+ ItemStack 格式
-// 结构: present(bool) -> item_id(VarInt) -> count(byte) -> components
+// ReadSlotData 解析 1.21+ ItemStack 格式
+// 结构: count(VarInt) -> [如果count>0] item_id(VarInt) -> components
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
-	// 1. present (bool)
-	present, err := ReadBoolFromReader(r)
+	// 1. item_count (VarInt) - 同时作为present标志
+	count, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
-	if !present {
-		return nil, nil
+	if count == 0 {
+		return nil, nil // 空物品
 	}
 
 	// 2. item_id (VarInt)
@@ -76,19 +76,13 @@ func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
 		return nil, err
 	}
 
-	// 3. count (byte) - 不是 VarInt!
-	countByte, err := ReadU8(r)
-	if err != nil {
-		return nil, err
-	}
-
-	// 4. components
+	// 3. 跳过components
 	if err := SkipSlotComponents(r); err != nil {
-		logx.Warnf("Slot解析失败: itemID=%d, count=%d, err=%v", itemID, countByte, err)
+		logx.Warnf("Slot解析失败: itemID=%d, count=%d, err=%v", itemID, count, err)
 		return nil, err
 	}
 
-	return &SlotData{ID: itemID, Count: int32(countByte)}, nil
+	return &SlotData{ID: itemID, Count: count}, nil
 }
 
 // SkipSlotComponents 跳过物品组件
