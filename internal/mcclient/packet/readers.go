@@ -58,31 +58,75 @@ func ReadBytes(r io.Reader, n int) []byte {
 	return b
 }
 
-// ReadSlotData 解析 1.21+ ItemStack 格式
-// 结构: count(VarInt) -> [如果count>0] item_id(VarInt) -> components
+// ReadSlotData 解析 ItemStack 格式
+// 支持两种格式:
+// 1. 新格式 (1.21+): count(VarInt) -> item_id(VarInt) -> components
+// 2. 旧格式 (1.20.5-): present(bool) -> item_id(VarInt) -> count(byte) -> nbt
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
-	// 1. item_count (VarInt) - 同时作为present标志
-	count, err := ReadVarIntFromReader(r)
+	// 先尝试读取第一个字节来判断格式
+	firstByte, err := r.ReadByte()
 	if err != nil {
 		return nil, err
 	}
-	if count == 0 {
-		return nil, nil // 空物品
+	if err := r.UnreadByte(); err != nil {
+		return nil, err
 	}
 
-	// 2. item_id (VarInt)
+	// 如果第一个字节的最高位为0（小于0x80），可能是新格式的count
+	// 否则可能是旧格式的present(bool)
+	if firstByte < 0x80 {
+		// 尝试新格式: count(VarInt)
+		count, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			return nil, nil // 空物品
+		}
+
+		// 读取item_id
+		itemID, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return nil, err
+		}
+
+		// 跳过components
+		if err := SkipSlotComponents(r); err != nil {
+			logx.Warnf("Slot解析失败(新格式): itemID=%d, count=%d, err=%v", itemID, count, err)
+			return nil, err
+		}
+
+		return &SlotData{ID: itemID, Count: count}, nil
+	}
+
+	// 旧格式: present(bool) -> item_id(VarInt) -> count(byte) -> nbt
+	present, err := ReadBoolFromReader(r)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
+
+	// item_id
 	itemID, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. 跳过components
-	if err := SkipSlotComponents(r); err != nil {
-		logx.Warnf("Slot解析失败: itemID=%d, count=%d, err=%v", itemID, count, err)
+	// count (byte)
+	countByte, err := ReadU8(r)
+	if err != nil {
 		return nil, err
 	}
 
-	return &SlotData{ID: itemID, Count: count}, nil
+	// 旧格式的NBT数据 - 使用NetworkFormat跳过
+	if err := SkipNBT(r); err != nil {
+		logx.Warnf("Slot解析失败(旧格式): itemID=%d, count=%d, err=%v", itemID, countByte, err)
+		return nil, err
+	}
+
+	return &SlotData{ID: itemID, Count: int32(countByte)}, nil
 }
 
 // SkipSlotComponents 跳过物品组件
