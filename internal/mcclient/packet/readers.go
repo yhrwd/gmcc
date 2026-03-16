@@ -58,46 +58,60 @@ func ReadBytes(r io.Reader, n int) []byte {
 	return b
 }
 
+// ReadSlotData 解析 1.20.5+ ItemStack 格式
+// 结构: present(bool) -> item_id(VarInt) -> count(byte) -> components
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
-	startPos := r.Len()
+	// 1. present (bool)
+	present, err := ReadBoolFromReader(r)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
 
-	// 物品ID: VarInt, 0 表示空槽
+	// 2. item_id (VarInt)
 	itemID, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return nil, err
 	}
-	if itemID == 0 {
-		return nil, nil
-	}
 
-	// 数量: VarInt
-	count, err := ReadVarIntFromReader(r)
+	// 3. count (byte) - 不是 VarInt!
+	countByte, err := ReadU8(r)
 	if err != nil {
 		return nil, err
 	}
 
-	// 组件数据
+	// 4. components
 	if err := SkipSlotComponents(r); err != nil {
-		remaining := r.Len()
-		logx.Warnf("Slot解析失败: itemID=%d, count=%d, startPos=%d, remaining=%d, err=%v",
-			itemID, count, startPos, remaining, err)
+		logx.Warnf("Slot解析失败: itemID=%d, count=%d, err=%v", itemID, countByte, err)
 		return nil, err
 	}
 
-	return &SlotData{ID: itemID, Count: count}, nil
+	return &SlotData{ID: itemID, Count: int32(countByte)}, nil
 }
 
+// SkipSlotComponents 跳过物品组件
+// 结构: components_to_add(VarInt) -> [component_type(VarInt) + data] -> components_to_remove(VarInt) -> [component_type(VarInt)]
 func SkipSlotComponents(r *bytes.Reader) error {
+	// 添加的组件
 	numAdd, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
 	for i := int32(0); i < numAdd; i++ {
-		if err := SkipComponentData(r); err != nil {
+		// 先读 component_type
+		componentType, err := ReadVarIntFromReader(r)
+		if err != nil {
 			return err
+		}
+		// 再根据类型跳过数据
+		if err := SkipComponentByType(r, componentType); err != nil {
+			return fmt.Errorf("component type %d: %w", componentType, err)
 		}
 	}
 
+	// 移除的组件 (只有 component_type)
 	numRemove, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return err
@@ -110,22 +124,13 @@ func SkipSlotComponents(r *bytes.Reader) error {
 	return nil
 }
 
-func SkipComponentData(r *bytes.Reader) error {
-	componentType, err := ReadVarIntFromReader(r)
-	if err != nil {
-		return err
-	}
-	if err := SkipComponentByType(r, componentType); err != nil {
-		return fmt.Errorf("component type %d: %w", componentType, err)
-	}
-	return nil
-}
-
+// SkipNBT 跳过 Network NBT 格式 (无 name 字段)
 func SkipNBT(r *bytes.Reader) error {
 	dec := nbt.NewDecoder(r).NetworkFormat(true)
 	return dec.Skip()
 }
 
+// ReadAnonymousNBTJSON 解析 Network NBT 并返回 JSON 字符串
 func ReadAnonymousNBTJSON(r io.Reader) (string, error) {
 	dec := nbt.NewDecoder(r)
 	dec.NetworkFormat(true)
