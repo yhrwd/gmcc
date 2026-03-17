@@ -3,7 +3,11 @@ package mcclient
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
@@ -11,6 +15,9 @@ import (
 	"gmcc/internal/player"
 	"gmcc/internal/registry"
 )
+
+// DEBUG_MODE: 临时关闭背包解析，将原始包dump到文件
+const DEBUG_DUMP_CONTAINER_PACKETS = true
 
 const (
 	ContainerTypePlayer    int32 = 0
@@ -104,6 +111,11 @@ func (c *Client) handleContainerSetDataPacket(data []byte) error {
 }
 
 func (c *Client) handleContainerContentPacket(data []byte) error {
+	// DEBUG: 完全dump背包内容包到文件，暂时关闭解析
+	if DEBUG_DUMP_CONTAINER_PACKETS {
+		return c.dumpContainerPacket("container_content", data)
+	}
+
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
@@ -164,7 +176,55 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 	return nil
 }
 
+// dumpContainerPacket 将容器包完整dump到文件
+func (c *Client) dumpContainerPacket(packetName string, data []byte) error {
+	// 创建dump目录
+	logDir := "logs"
+	dumpDir := filepath.Join(logDir, "dumps")
+	if err := os.MkdirAll(dumpDir, 0755); err != nil {
+		logx.Warnf("无法创建dump目录: %v", err)
+		return err
+	}
+
+	// 生成文件名
+	timestamp := time.Now().Format("20060102-150405")
+	filename := filepath.Join(dumpDir, fmt.Sprintf("%s_%s.txt", timestamp, packetName))
+
+	// 创建文件
+	f, err := os.Create(filename)
+	if err != nil {
+		logx.Warnf("无法创建dump文件: %v", err)
+		return err
+	}
+	defer f.Close()
+
+	// 写入头部信息
+	fmt.Fprintf(f, "# Packet: %s\n", packetName)
+	fmt.Fprintf(f, "# Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(f, "# Length: %d bytes\n", len(data))
+	fmt.Fprintln(f, "# --- HEX DUMP ---")
+
+	// 写入十六进制数据
+	hexData := hex.EncodeToString(data)
+	// 每行64个字符
+	for i := 0; i < len(hexData); i += 64 {
+		end := i + 64
+		if end > len(hexData) {
+			end = len(hexData)
+		}
+		fmt.Fprintln(f, hexData[i:end])
+	}
+
+	logx.Infof("dumped packet %s to %s (%d bytes)", packetName, filename, len(data))
+	return nil
+}
+
 func (c *Client) handleContainerSlotPacket(data []byte) error {
+	// DEBUG: 完全dump背包槽位包到文件，暂时关闭解析
+	if DEBUG_DUMP_CONTAINER_PACKETS {
+		return c.dumpContainerPacket("container_slot", data)
+	}
+
 	r := bytes.NewReader(data)
 	windowID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
