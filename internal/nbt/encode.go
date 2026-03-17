@@ -7,6 +7,8 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Marshal encodes v into NBT format
@@ -312,11 +314,67 @@ func (e *Encoder) writeInt64(v int64) error {
 }
 
 func (e *Encoder) writeString(s string) error {
-	b := []byte(s)
+	b := utf8ToCESU8(s)
 	if err := e.writeInt16(int16(len(b))); err != nil {
 		return err
 	}
 	return e.writeBytes(b)
+}
+
+func utf8ToCESU8(s string) []byte {
+	if !needsCESU8Conversion(s) {
+		return []byte(s)
+	}
+
+	var result []byte
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRuneInString(s[i:])
+		if r < 0x10000 {
+			result = append(result, encodeUTF8ToCESU8Single(r)...)
+			i += n
+		} else {
+			high, low := utf16.EncodeRune(r)
+			result = append(result, encodeUTF8ToCESU8Single(high)...)
+			result = append(result, encodeUTF8ToCESU8Single(low)...)
+			i += n
+		}
+	}
+	return result
+}
+
+func needsCESU8Conversion(s string) bool {
+	for _, r := range s {
+		if r >= 0xD800 && r <= 0xDFFF {
+			return true
+		}
+		if r > 0xFFFF {
+			return true
+		}
+		if r >= 0xE000 && r <= 0xFFFF {
+			return true
+		}
+	}
+	return false
+}
+
+func encodeUTF8ToCESU8Single(r rune) []byte {
+	if r < 0x80 {
+		return []byte{byte(r)}
+	}
+	if r < 0x800 {
+		return []byte{
+			0xC0 | byte(r>>6),
+			0x80 | byte(r&0x3F),
+		}
+	}
+	if r < 0x10000 {
+		return []byte{
+			0xE0 | byte(r>>12),
+			0x80 | byte((r>>6)&0x3F),
+			0x80 | byte(r&0x3F),
+		}
+	}
+	return nil
 }
 
 func (e *Encoder) writeByteArray(b []byte) error {

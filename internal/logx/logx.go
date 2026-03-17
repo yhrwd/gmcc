@@ -84,6 +84,18 @@ func Debugf(format string, args ...interface{}) {
 func PacketLogf(format string, args ...interface{}) {
 }
 
+func PacketWarn(packetName string, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if debugEnabled || fileLogger != nil {
+		now := time.Now().Format("15:04:05")
+		consoleLogger.Printf("%s [WARN] Packet解析警告: %s: %v", now, packetName, err)
+		if fileLogger != nil {
+			fileLogger.Printf("[WARN] Packet解析警告: %s: %v", packetName, err)
+		}
+	}
+}
+
 func PacketError(packetName string, data []byte, err error) {
 	mu.Lock()
 	defer mu.Unlock()

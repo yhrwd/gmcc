@@ -82,9 +82,9 @@ func (c *Client) handleGameEventPacket(data []byte) error {
 		return nil
 	}
 
-	eventType, _ := packet.ReadU8(r)
+	eventType := packet.MustReadU8(r, "player_info.eventType")
 	var value float32
-	binary.Read(r, binary.BigEndian, &value)
+	_ = binary.Read(r, binary.BigEndian, &value)
 
 	if eventType == 3 && value >= 0 && value <= 3 {
 		mode := player.GameMode(int(value))
@@ -184,9 +184,9 @@ func (c *Client) readLoginPlayerState(r *bytes.Reader) error {
 	}
 	c.Player.SetGameMode(player.GameMode(int(gameMode)))
 
-	_, _ = packet.ReadU8(r)             // prevGameMode
-	_, _ = packet.ReadBoolFromReader(r) // isDebug
-	_, _ = packet.ReadBoolFromReader(r) // isFlat
+	_ = packet.MustReadU8(r, "login.prevGameMode") // prevGameMode
+	_ = packet.MustReadBool(r, "login.isDebug")    // isDebug
+	_ = packet.MustReadBool(r, "login.isFlat")     // isFlat
 	return nil
 }
 
@@ -206,9 +206,9 @@ func (c *Client) readLoginDeathLocation(r *bytes.Reader) error {
 }
 
 func (c *Client) readLoginMisc(r *bytes.Reader) error {
-	_, _ = packet.ReadVarIntFromReader(r) // portalCooldown
-	_, _ = packet.ReadVarIntFromReader(r) // seaLevel
-	_, _ = packet.ReadBoolFromReader(r)   // secureChatEnforced
+	_ = packet.MustReadVarInt(r, "login.portalCooldown")   // portalCooldown
+	_ = packet.MustReadVarInt(r, "login.seaLevel")         // seaLevel
+	_ = packet.MustReadBool(r, "login.secureChatEnforced") // secureChatEnforced
 	return nil
 }
 

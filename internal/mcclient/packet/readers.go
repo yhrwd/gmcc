@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"gmcc/internal/constants"
 	"gmcc/internal/logx"
 	"gmcc/internal/nbt"
 )
@@ -16,12 +17,102 @@ type SlotData struct {
 	Count int32
 }
 
-func ReadVarIntFromReader(r *bytes.Reader) (int32, error) {
-	return ReadVarInt(r)
+// MustReadBytes 读取字节，错误不终止但记录日志
+// 用于解析非关键数据时忽略错误
+func MustReadBytes(r io.Reader, n int, name string) []byte {
+	b, err := ReadBytes(r, n)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return b
 }
 
-func ReadStringFromReader(r *bytes.Reader) (string, error) {
-	return ReadString(r, r)
+type byteReaderWrapper struct {
+	r io.Reader
+}
+
+func newByteReaderWrapper(r io.Reader) *byteReaderWrapper {
+	return &byteReaderWrapper{r: r}
+}
+
+func (b *byteReaderWrapper) Read(p []byte) (n int, err error) {
+	return b.r.Read(p)
+}
+
+func (b *byteReaderWrapper) ReadByte() (byte, error) {
+	var buf [1]byte
+	if _, err := io.ReadFull(b.r, buf[:]); err != nil {
+		return 0, err
+	}
+	return buf[0], nil
+}
+
+// MustReadVarInt 读取 VarInt，错误不终止但记录日志
+func MustReadVarInt(r io.Reader, name string) int32 {
+	v, err := ReadVarIntFromReader(r)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return v
+}
+
+// MustReadString 读取字符串，错误不终止但记录日志
+func MustReadString(r io.Reader, name string) string {
+	s, err := ReadStringFromReader(r)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return s
+}
+
+// MustReadBool 读取布尔值，错误不终止但记录日志
+func MustReadBool(r io.Reader, name string) bool {
+	v, err := ReadBool(r)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return v
+}
+
+// MustReadU8 读取 uint8，错误不终止但记录日志
+func MustReadU8(r io.Reader, name string) byte {
+	v, err := ReadU8(r)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return v
+}
+
+// MustReadInt32 读取 int32，错误不终止但记录日志
+func MustReadInt32(r io.Reader, name string) int32 {
+	v, err := ReadInt32(r)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return v
+}
+
+// MustReadFloat64 读取 float64，错误不终止但记录日志
+func MustReadFloat64(r io.Reader, name string) float64 {
+	v, err := ReadFloat64FromReader(r)
+	if err != nil {
+		logx.PacketWarn(name, err)
+	}
+	return v
+}
+
+func ReadVarIntFromReader(r io.Reader) (int32, error) {
+	if br, ok := r.(io.ByteReader); ok {
+		return ReadVarInt(br)
+	}
+	return ReadVarInt(newByteReaderWrapper(r))
+}
+
+func ReadStringFromReader(r io.Reader) (string, error) {
+	if br, ok := r.(io.ByteReader); ok {
+		return ReadString(br, r)
+	}
+	return ReadString(newByteReaderWrapper(r), r)
 }
 
 func ReadBoolFromReader(r io.Reader) (bool, error) {
@@ -52,10 +143,18 @@ func ReadU8(r io.Reader) (byte, error) {
 	return b[0], nil
 }
 
-func ReadBytes(r io.Reader, n int) []byte {
+func ReadBytes(r io.Reader, n int) ([]byte, error) {
+	if n < 0 {
+		return nil, fmt.Errorf("negative read length: %d", n)
+	}
+	if n > constants.MaxPacketSize {
+		return nil, fmt.Errorf("read length exceeds max allowed: %d > %d", n, constants.MaxPacketSize)
+	}
 	b := make([]byte, n)
-	_, _ = io.ReadFull(r, b)
-	return b
+	if _, err := io.ReadFull(r, b); err != nil {
+		return nil, fmt.Errorf("read %d bytes: %w", n, err)
+	}
+	return b, nil
 }
 
 // ReadSlotData 解析 1.21+ ItemStack 格式

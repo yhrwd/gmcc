@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gmcc/internal/constants"
 )
 
 const (
-	sessionDir      = ".session"
-	tokenExpirySkew = 30 * time.Second
+	sessionDir = ".session"
 )
 
 type MicrosoftTokenCache struct {
@@ -126,7 +127,7 @@ func tokenUsable(token string, expiresAt time.Time, now time.Time) bool {
 	if strings.TrimSpace(token) == "" || expiresAt.IsZero() {
 		return false
 	}
-	return now.Add(tokenExpirySkew).Before(expiresAt)
+	return now.Add(constants.TokenExpirySkew).Before(expiresAt)
 }
 
 func sanitizePlayerID(playerID string) string {

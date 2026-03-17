@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"gmcc/internal/constants"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/mcclient/protocol"
@@ -48,18 +49,20 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 			return fmt.Errorf("读取 player_position teleport id 失败: %w", err)
 		}
 
-		x, _ := packet.ReadFloat64FromReader(r)
-		y, _ := packet.ReadFloat64FromReader(r)
-		z, _ := packet.ReadFloat64FromReader(r)
+		x := packet.MustReadFloat64(r, "player_position.x")
+		y := packet.MustReadFloat64(r, "player_position.y")
+		z := packet.MustReadFloat64(r, "player_position.z")
 
-		deltaX, _ := packet.ReadFloat64FromReader(r)
-		deltaY, _ := packet.ReadFloat64FromReader(r)
-		deltaZ, _ := packet.ReadFloat64FromReader(r)
+		deltaX := packet.MustReadFloat64(r, "player_position.deltaX")
+		deltaY := packet.MustReadFloat64(r, "player_position.deltaY")
+		deltaZ := packet.MustReadFloat64(r, "player_position.deltaZ")
 
-		yRot := packet.ReadFloat32FromBytes(packet.ReadBytes(r, 4))
-		xRot := packet.ReadFloat32FromBytes(packet.ReadBytes(r, 4))
+		yRotBytes := packet.MustReadBytes(r, 4, "player_position.yRot")
+		yRot := packet.ReadFloat32FromBytes(yRotBytes)
+		xRotBytes := packet.MustReadBytes(r, 4, "player_position.xRot")
+		xRot := packet.ReadFloat32FromBytes(xRotBytes)
 
-		relBits, _ := packet.ReadInt32FromReader(r)
+		relBits := packet.MustReadVarInt(r, "player_position.relBits")
 
 		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x",
 			teleportID, x, y, z, yRot, xRot, relBits)
@@ -153,7 +156,7 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 }
 
 func (c *Client) sendAFKHeartbeatIfNeeded() error {
-	if time.Since(c.lastAFKPacket) < 15*time.Second {
+	if time.Since(c.lastAFKPacket) < constants.AFKCheckInterval {
 		return nil
 	}
 	c.lastAFKPacket = time.Now()

@@ -212,26 +212,83 @@ func (p *snbtParser) parseString() (string, error) {
 		}
 		if ch == '\\' && p.pos+1 < len(p.input) {
 			p.pos++
-			escaped := p.input[p.pos]
-			switch escaped {
-			case 'n':
-				result.WriteByte('\n')
-			case 'r':
-				result.WriteByte('\r')
-			case 't':
-				result.WriteByte('\t')
-			case '\\', '"', '\'':
-				result.WriteByte(escaped)
-			default:
-				result.WriteByte('\\')
-				result.WriteByte(escaped)
+			escaped, err := p.parseEscape()
+			if err != nil {
+				return "", err
 			}
+			result.WriteString(escaped)
 		} else {
 			result.WriteByte(ch)
 		}
 		p.pos++
 	}
 	return "", ErrInvalidSNBT
+}
+
+func (p *snbtParser) parseEscape() (string, error) {
+	if p.pos >= len(p.input) {
+		return "", ErrInvalidSNBT
+	}
+	ch := p.input[p.pos]
+	switch ch {
+	case 'b':
+		return "\b", nil
+	case 'f':
+		return "\f", nil
+	case 'n':
+		return "\n", nil
+	case 'r':
+		return "\r", nil
+	case 's':
+		return " ", nil
+	case 't':
+		return "\t", nil
+	case '\\':
+		return "\\", nil
+	case '\'':
+		return "'", nil
+	case '"':
+		return "\"", nil
+	case 'x':
+		return p.parseHexEscape(2)
+	case 'u':
+		return p.parseHexEscape(4)
+	case 'U':
+		return p.parseHexEscape(8)
+	case 'N':
+		return p.parseUnicodeName()
+	}
+	return "", fmt.Errorf("invalid escape sequence: \\%c", ch)
+}
+
+func (p *snbtParser) parseHexEscape(digits int) (string, error) {
+	if p.pos+digits > len(p.input) {
+		return "", ErrInvalidSNBT
+	}
+	p.pos += digits
+	hex := p.input[p.pos-digits : p.pos]
+	code, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil {
+		return "", err
+	}
+	return string(rune(code)), nil
+}
+
+func (p *snbtParser) parseUnicodeName() (string, error) {
+	if p.pos >= len(p.input) || p.input[p.pos] != '{' {
+		return "", ErrInvalidSNBT
+	}
+	p.pos++
+	start := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '}' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return "", ErrInvalidSNBT
+	}
+	name := p.input[start:p.pos]
+	p.pos++
+	return "\\N{" + name + "}", nil
 }
 
 func (p *snbtParser) parseUnquotedKey() (string, error) {
@@ -260,68 +317,152 @@ func (p *snbtParser) parseUnquoted() (any, error) {
 
 	s := result.String()
 
-	// Check for number suffixes
-	if len(s) > 1 {
-		last := s[len(s)-1]
-		numPart := s[:len(s)-1]
-		switch last {
-		case 'b', 'B':
-			return p.parseNumber(numPart, last)
-		case 's', 'S':
-			return p.parseNumber(numPart, last)
-		case 'l', 'L':
-			return p.parseNumber(numPart, last)
-		case 'f', 'F':
-			return p.parseNumber(numPart, last)
-		case 'd', 'D':
-			return p.parseNumber(numPart, last)
-		}
+	if len(s) < 2 {
+		return p.parseSimpleValue(s)
 	}
 
-	// Try to parse as number
+	last := s[len(s)-1]
+	secondLast := s[len(s)-2]
+
+	if (secondLast == 's' || secondLast == 'S' || secondLast == 'u' || secondLast == 'U') &&
+		(last == 'b' || last == 'B' || last == 's' || last == 'S' ||
+			last == 'l' || last == 'L' || last == 'f' || last == 'F' || last == 'd' || last == 'D') {
+		numPart := s[:len(s)-2]
+		sign := secondLast
+		suffix := last
+		return p.parseNumberWithSign(numPart, sign, suffix)
+	}
+
+	if last == 'b' || last == 'B' || last == 's' || last == 'S' ||
+		last == 'l' || last == 'L' || last == 'f' || last == 'F' || last == 'd' || last == 'D' {
+		numPart := s[:len(s)-1]
+		return p.parseNumber(numPart, last)
+	}
+
+	return p.parseSimpleValue(s)
+}
+
+func (p *snbtParser) parseSimpleValue(s string) (any, error) {
 	if v, err := p.parseNumber(s, 0); err == nil {
 		return v, nil
 	}
-
-	// Check for boolean
 	if s == "true" || s == "false" {
 		return s == "true", nil
 	}
-
 	return s, nil
+}
+
+func (p *snbtParser) parseNumberWithSign(numPart string, sign byte, suffix byte) (any, error) {
+	base := 10
+	if strings.HasPrefix(numPart, "0x") || strings.HasPrefix(numPart, "0X") {
+		base = 16
+		numPart = numPart[2:]
+	} else if strings.HasPrefix(numPart, "0b") || strings.HasPrefix(numPart, "0B") {
+		base = 2
+		numPart = numPart[2:]
+	}
+
+	isUnsigned := sign == 'u' || sign == 'U'
+
+	switch suffix {
+	case 'b', 'B':
+		v, _ := strconv.ParseInt(numPart, base, 8)
+		if isUnsigned {
+			return uint8(v), nil
+		}
+		return int8(v), nil
+	case 's', 'S':
+		v, _ := strconv.ParseInt(numPart, base, 16)
+		if isUnsigned {
+			return uint16(v), nil
+		}
+		return int16(v), nil
+	case 'l', 'L':
+		v, _ := strconv.ParseInt(numPart, base, 64)
+		if isUnsigned {
+			return uint64(v), nil
+		}
+		return int64(v), nil
+	}
+	return p.parseNumber(string(suffix), suffix)
 }
 
 func (p *snbtParser) parseNumber(s string, suffix byte) (any, error) {
 	s = strings.ReplaceAll(s, "_", "")
 
+	base := 10
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		base = 16
+		s = s[2:]
+	} else if strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B") {
+		base = 2
+		s = s[2:]
+	}
+
 	switch suffix {
 	case 'b', 'B':
-		return parseInteger[int8](s, 8)
+		return parseSignedInteger[int8](s, base, 8)
 	case 's', 'S':
-		return parseInteger[int16](s, 16)
+		return parseSignedInteger[int16](s, base, 16)
 	case 'l', 'L':
-		return parseInteger[int64](s, 64)
+		return parseSignedInteger[int64](s, base, 64)
 	case 'f', 'F':
 		return parseFloat[float32](s, 32)
 	case 'd', 'D':
 		return parseFloat[float64](s, 64)
 	default:
-		if v, err := strconv.ParseInt(s, 10, 64); err == nil {
-			if v >= math.MinInt32 && v <= math.MaxInt32 {
-				return int32(v), nil
-			}
+		if v, err := parseIntegerAuto(s, base); err == nil {
 			return v, nil
 		}
-		if v, err := strconv.ParseFloat(s, 64); err == nil {
+		if v, err := parseScientific(s); err == nil {
 			return v, nil
 		}
 		return nil, fmt.Errorf("invalid number: %s", s)
 	}
 }
 
+func parseIntegerAuto(s string, base int) (any, error) {
+	v, err := strconv.ParseInt(s, base, 64)
+	if err != nil {
+		return nil, err
+	}
+	if v >= math.MinInt8 && v <= math.MaxInt8 {
+		return int8(v), nil
+	}
+	if v >= math.MinInt16 && v <= math.MaxInt16 {
+		return int16(v), nil
+	}
+	if v >= math.MinInt32 && v <= math.MaxInt32 {
+		return int32(v), nil
+	}
+	return v, nil
+}
+
+func parseScientific(s string) (any, error) {
+	if !strings.ContainsAny(s, "eE") {
+		return nil, fmt.Errorf("not a scientific number")
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil, err
+	}
+	if math.IsInf(v, 0) || math.IsNaN(v) {
+		return nil, fmt.Errorf("number out of range: %s", s)
+	}
+	return v, nil
+}
+
 func parseInteger[T int8 | int16 | int64](s string, bits int) (T, error) {
 	v, err := strconv.ParseInt(s, 10, bits)
 	return T(v), err
+}
+
+func parseSignedInteger[T int8 | int16 | int64](s string, base int, bits int) (T, error) {
+	v, err := strconv.ParseInt(s, base, bits)
+	if err != nil {
+		return 0, err
+	}
+	return T(v), nil
 }
 
 func parseFloat[T float32 | float64](s string, bits int) (T, error) {

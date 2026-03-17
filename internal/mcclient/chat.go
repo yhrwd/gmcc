@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"gmcc/internal/constants"
+
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
@@ -175,7 +177,7 @@ func (c *Client) runOnJoinActionsAsync() {
 }
 
 func (c *Client) syncPlayerInfo() {
-	time.Sleep(5 * time.Second)
+	time.Sleep(constants.ReconnectDelay)
 
 	info := c.Player.GetInfo()
 	c.logPlayerInfo(info)
@@ -219,7 +221,7 @@ func (c *Client) logInventory(inventory map[int8]*player.Item) {
 	logx.Infof("=== 背包内容 ===")
 	if len(inventory) == 0 {
 		logx.Infof("背包为空（等待3秒后重试...）")
-		time.Sleep(3 * time.Second)
+		time.Sleep(constants.AuthRetryDelay)
 		inventory = c.Player.Inventory.GetAll()
 		if len(inventory) == 0 {
 			logx.Infof("背包确实为空")

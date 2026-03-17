@@ -14,6 +14,7 @@ import (
 	"gmcc/internal/auth/microsoft"
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/config"
+	"gmcc/internal/constants"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/mcclient/protocol"
@@ -122,7 +123,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 	c.lastAFKPacket = time.Now()
 
 	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
-	dialer := net.Dialer{Timeout: 10 * time.Second}
+	dialer := net.Dialer{Timeout: constants.DialTimeout}
 	rawConn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("连接服务器失败: %w", err)
@@ -153,7 +154,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 		default:
 		}
 
-		_ = c.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		_ = c.conn.SetReadDeadline(time.Now().Add(constants.ReadTimeout))
 		pkt, err := c.conn.ReadPacket()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
