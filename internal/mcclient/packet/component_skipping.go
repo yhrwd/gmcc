@@ -53,10 +53,10 @@ func init() {
 		37: SkipVarInt,                                                                // map_id
 		38: SkipNBT,                                                                   // map_decorations
 		39: SkipVarInt,                                                                // map_post_processing
-		40: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // charged_projectiles
-		41: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // bundle_contents
-		42: SkipPotionContents,                                                        // potion_contents
-		43: SkipFloat32,                                                               // potion_duration_scale
+		40: SkipFloat32,                                                               // potion_duration_scale
+		41: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // charged_projectiles
+		42: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // bundle_contents
+		43: SkipPotionContents,                                                        // potion_contents
 		44: SkipSuspiciousStewEffects,                                                 // suspicious_stew_effects
 		45: SkipWritableBookContent,                                                   // writable_book_content
 		46: SkipWrittenBookContent,                                                    // written_book_content
@@ -85,6 +85,7 @@ func init() {
 		69: SkipNBT,                                                                   // lock
 		70: SkipNBT,                                                                   // container_loot
 		71: SkipSoundEvent,                                                            // break_sound
+		// 72+ 是实体变种子组件，根据版本可能不存在
 	}
 }
 
@@ -378,6 +379,19 @@ func SkipIDOrX(r *bytes.Reader, skipInline func(*bytes.Reader) error) error {
 func SkipBool(r *bytes.Reader) error {
 	_, err := ReadBoolFromReader(r)
 	return err
+}
+
+func SkipBooleanAND(r *bytes.Reader) error {
+	length, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < length; i++ {
+		if err := SkipNBT(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func SkipEnchantments(r *bytes.Reader) error {
