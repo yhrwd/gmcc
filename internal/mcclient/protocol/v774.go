@@ -67,17 +67,17 @@ const (
 	PlayClientSystemChat       int32 = 0x77
 	PlayClientSetHealth        int32 = 0x66
 	PlayClientSetExperience    int32 = 0x65
-	PlayClientPlayerInfoUpdate int32 = 0x42
-	PlayClientPlayerInfoRemove int32 = 0x3D
-	PlayClientSetHeldSlot      int32 = 0x2F
+	PlayClientPlayerInfoUpdate int32 = 0x44
+	PlayClientPlayerInfoRemove int32 = 0x43
+	PlayClientSetHeldSlot      int32 = 0x67
 	PlayClientContainerClose   int32 = 0x11
 	PlayClientContainerContent int32 = 0x12
 	PlayClientContainerSetData int32 = 0x13
 	PlayClientContainerSlot    int32 = 0x14
-	PlayClientOpenScreen       int32 = 0x0D
+	PlayClientOpenScreen       int32 = 0x39
 	PlayClientPlayerAbilities  int32 = 0x3E
-	PlayClientEntityData       int32 = 0x5D
-	PlayClientGameEvent        int32 = 0x22
+	PlayClientEntityData       int32 = 0x61
+	PlayClientGameEvent        int32 = 0x26
 
 	PlayServerMsgAck          int32 = 0x05
 	PlayServerChatCommand     int32 = 0x06

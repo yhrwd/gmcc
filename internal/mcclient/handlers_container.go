@@ -52,52 +52,52 @@ func containerTypeName(t int32) string {
 
 func (c *Client) handleOpenScreenPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	windowID, err := packet.ReadVarIntFromReader(r)
+	name, err := c.readAnonymousNBTJSON(r)
 	if err != nil {
 		return err
 	}
-	windowType, err := packet.ReadVarIntFromReader(r)
+	screenHandlerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
-	title, err := c.readAnonymousNBTJSON(r)
+	syncId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
 
 	c.Player.SetOpenContainer(&player.ContainerState{
-		WindowID:   windowID,
-		WindowType: windowType,
+		WindowID:   syncId,
+		WindowType: screenHandlerId,
 		Open:       true,
 	})
 
-	logx.Infof("open_screen: windowID=%d, type=%s, title=%s", windowID, containerTypeName(windowType), title)
+	logx.Infof("open_screen: syncId=%d, screenHandlerId=%d, name=%s", syncId, screenHandlerId, name)
 	return nil
 }
 
 func (c *Client) handleContainerClosePacket(data []byte) error {
 	r := bytes.NewReader(data)
-	windowID, err := packet.ReadVarIntFromReader(r)
+	syncId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
 
 	container := c.Player.GetOpenContainer()
-	if container != nil && container.WindowID == windowID {
+	if container != nil && container.WindowID == syncId {
 		c.Player.SetOpenContainer(nil)
 	}
 
-	logx.Debugf("container_close: windowID=%d", windowID)
+	logx.Debugf("container_close: syncId=%d", syncId)
 	return nil
 }
 
 func (c *Client) handleContainerSetDataPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	windowID, err := packet.ReadVarIntFromReader(r)
+	propertyId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
-	property, err := packet.ReadVarIntFromReader(r)
+	syncId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func (c *Client) handleContainerSetDataPacket(data []byte) error {
 		return err
 	}
 
-	logx.Debugf("container_set_data: windowID=%d, property=%d, value=%d", windowID, property, value)
+	logx.Debugf("container_set_data: syncId=%d, propertyId=%d, value=%d", syncId, propertyId, value)
 	return nil
 }
 
@@ -117,10 +117,10 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 	}
 
 	r := bytes.NewReader(data)
-	windowID, err := packet.ReadVarIntFromReader(r)
+	syncId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("container_content", data, err)
-		return fmt.Errorf("container_content: 读取 windowID 失败: %w", err)
+		return fmt.Errorf("container_content: 读取 syncId 失败: %w", err)
 	}
 	stateID, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
@@ -135,7 +135,7 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 
 	c.Player.UpdateContainerStateID(stateID)
 
-	logx.Infof("container_content: windowID=%d, stateID=%d, numItems=%d, remaining=%d bytes", windowID, stateID, numItems, r.Len())
+	logx.Infof("container_content: syncId=%d, stateID=%d, numItems=%d, remaining=%d bytes", syncId, stateID, numItems, r.Len())
 
 	if numItems > 1000 {
 		logx.Warnf("container_content: numItems 过大 (%d), 限制为 1000", numItems)
@@ -172,7 +172,7 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 		logx.Infof("container_content: carried item: id=%d (%s), count=%d", carriedItem.ID, itemName, carriedItem.Count)
 	}
 
-	c.Player.UpdateInventory(windowID, items, carried)
+	c.Player.UpdateInventory(syncId, items, carried)
 	return nil
 }
 
@@ -226,7 +226,7 @@ func (c *Client) handleContainerSlotPacket(data []byte) error {
 	}
 
 	r := bytes.NewReader(data)
-	windowID, err := packet.ReadVarIntFromReader(r)
+	syncId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("container_slot", data, err)
 		return nil
@@ -257,12 +257,12 @@ func (c *Client) handleContainerSlotPacket(data []byte) error {
 		slotItem = &player.SlotData{ID: item.ID, Count: item.Count}
 		itemName := reg.IDToName(item.ID)
 		localizedName := reg.LocalizedName(item.ID)
-		logx.Infof("container_slot: windowID=%d, stateID=%d, slot=%d, item_id=%d (%s), name=%s, count=%d", windowID, stateID, slot, item.ID, itemName, localizedName, item.Count)
+		logx.Infof("container_slot: syncId=%d, stateID=%d, slot=%d, item_id=%d (%s), name=%s, count=%d", syncId, stateID, slot, item.ID, itemName, localizedName, item.Count)
 	} else {
-		logx.Debugf("container_slot: windowID=%d, stateID=%d, slot=%d, item=empty", windowID, stateID, slot)
+		logx.Debugf("container_slot: syncId=%d, stateID=%d, slot=%d, item=empty", syncId, stateID, slot)
 	}
 
-	c.Player.UpdateSlot(windowID, int32(slot), slotItem)
+	c.Player.UpdateSlot(syncId, int32(slot), slotItem)
 	return nil
 }
 

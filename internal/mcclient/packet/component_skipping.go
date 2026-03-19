@@ -13,79 +13,110 @@ var componentSkippers map[int32]componentSkipper
 
 func init() {
 	componentSkippers = map[int32]componentSkipper{
-		0:  SkipNBT,                                                                   // custom_data
-		1:  SkipVarInt,                                                                // max_stack_size
-		2:  SkipVarInt,                                                                // max_damage
-		3:  SkipVarInt,                                                                // damage
-		4:  SkipNothing,                                                               // unbreakable
-		5:  SkipNBT,                                                                   // custom_name (text component)
-		6:  SkipNBT,                                                                   // item_name (text component)
-		7:  SkipString,                                                                // item_model
-		8:  func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipNBT) },      // lore
-		9:  SkipVarInt,                                                                // rarity
-		10: SkipEnchantments,                                                          // enchantments
-		11: SkipBlockPredicates,                                                       // can_place_on
-		12: SkipBlockPredicates,                                                       // can_break
-		13: SkipAttributeModifiers,                                                    // attribute_modifiers
-		14: SkipCustomModelData,                                                       // custom_model_data
-		15: SkipTooltipDisplay,                                                        // tooltip_display
-		16: SkipVarInt,                                                                // repair_cost
-		17: SkipNothing,                                                               // creative_slot_lock
-		18: SkipBool,                                                                  // enchantment_glint_override
-		19: SkipNBT,                                                                   // intangible_projectile
-		20: SkipFood,                                                                  // food
-		21: SkipConsumable,                                                            // consumable
-		22: func(r *bytes.Reader) error { return SkipSlotData(r) },                    // use_remainder
-		23: SkipUseCooldown,                                                           // use_cooldown
-		24: SkipString,                                                                // damage_resistant
-		25: SkipTool,                                                                  // tool
-		26: SkipWeapon,                                                                // weapon
-		27: SkipVarInt,                                                                // enchantable
-		28: SkipEquippable,                                                            // equippable
-		29: SkipRepairable,                                                            // repairable
-		30: SkipNothing,                                                               // glider
-		31: SkipString,                                                                // tooltip_style
-		32: SkipDeathProtection,                                                       // death_protection
-		33: SkipBlocksAttacks,                                                         // blocks_attacks
-		34: SkipEnchantments,                                                          // stored_enchantments
-		35: SkipInt32,                                                                 // dyed_color
-		36: SkipInt32,                                                                 // map_color
-		37: SkipVarInt,                                                                // map_id
-		38: SkipNBT,                                                                   // map_decorations
-		39: SkipVarInt,                                                                // map_post_processing
-		40: SkipFloat32,                                                               // potion_duration_scale
-		41: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // charged_projectiles
-		42: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // bundle_contents
-		43: SkipPotionContents,                                                        // potion_contents
-		44: SkipSuspiciousStewEffects,                                                 // suspicious_stew_effects
-		45: SkipWritableBookContent,                                                   // writable_book_content
-		46: SkipWrittenBookContent,                                                    // written_book_content
-		47: SkipTrim,                                                                  // trim
-		48: SkipNBT,                                                                   // debug_stick_state
-		49: SkipEntityData,                                                            // entity_data
-		50: SkipNBT,                                                                   // bucket_entity_data
-		51: SkipBlockEntityData,                                                       // block_entity_data
-		52: SkipInstrument,                                                            // instrument
-		53: SkipProvidesTrimMaterial,                                                  // provides_trim_material
-		54: SkipVarInt,                                                                // ominous_bottle_amplifier
-		55: SkipJukeboxPlayable,                                                       // jukebox_playable
-		56: SkipString,                                                                // provides_banner_patterns
-		57: SkipNBT,                                                                   // recipes
-		58: SkipLodestoneTracker,                                                      // lodestone_tracker
-		59: SkipFireworkExplosion,                                                     // firework_explosion
-		60: SkipFireworks,                                                             // fireworks
-		61: SkipProfile,                                                               // profile
-		62: SkipString,                                                                // note_block_sound
-		63: SkipBannerPatterns,                                                        // banner_patterns
-		64: SkipDyeColor,                                                              // base_color
-		65: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipVarInt) },   // pot_decorations
-		66: func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // container
-		67: SkipBlockState,                                                            // block_state
-		68: SkipBees,                                                                  // bees
-		69: SkipNBT,                                                                   // lock
-		70: SkipNBT,                                                                   // container_loot
-		71: SkipSoundEvent,                                                            // break_sound
-		// 72+ 是实体变种子组件，根据版本可能不存在
+		0:   SkipNBT,                                                                   // custom_data
+		1:   SkipVarInt,                                                                // max_stack_size
+		2:   SkipVarInt,                                                                // max_damage
+		3:   SkipVarInt,                                                                // damage
+		4:   SkipNothing,                                                               // unbreakable
+		5:   SkipUseEffects,                                                            // use_effects (1.21.11+)
+		6:   SkipNBT,                                                                   // custom_name (text component)
+		7:   SkipVarInt,                                                                // minimum_attack_charge
+		8:   SkipRegistryValue,                                                         // damage_type
+		9:   SkipNBT,                                                                   // item_name (text component)
+		10:  SkipString,                                                                // item_model
+		11:  func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipNBT) },      // lore
+		12:  SkipVarInt,                                                                // rarity
+		13:  SkipEnchantments,                                                          // enchantments
+		14:  SkipBlockPredicates,                                                       // can_place_on
+		15:  SkipBlockPredicates,                                                       // can_break
+		16:  SkipAttributeModifiers,                                                    // attribute_modifiers
+		17:  SkipCustomModelData,                                                       // custom_model_data
+		18:  SkipTooltipDisplay,                                                        // tooltip_display
+		19:  SkipVarInt,                                                                // repair_cost
+		20:  SkipNothing,                                                               // creative_slot_lock
+		21:  SkipBool,                                                                  // enchantment_glint_override
+		22:  SkipNBT,                                                                   // intangible_projectile
+		23:  SkipFood,                                                                  // food
+		24:  SkipConsumable,                                                            // consumable
+		25:  func(r *bytes.Reader) error { return SkipSlotData(r) },                    // use_remainder
+		26:  SkipUseCooldown,                                                           // use_cooldown
+		27:  SkipRegistryValue,                                                         // damage_resistant
+		28:  SkipTool,                                                                  // tool
+		29:  SkipWeapon,                                                                // weapon
+		30:  SkipAttackRange,                                                           // attack_range (1.21.11+)
+		31:  SkipVarInt,                                                                // enchantable
+		32:  SkipEquippable,                                                            // equippable
+		33:  SkipRepairable,                                                            // repairable
+		34:  SkipNothing,                                                               // glider
+		35:  SkipNBT,                                                                   // tooltip_style (text component)
+		36:  SkipDeathProtection,                                                       // death_protection
+		37:  SkipBlocksAttacks,                                                         // blocks_attacks
+		38:  SkipPiercingWeapon,                                                        // piercing_weapon (1.21.11+)
+		39:  SkipKineticWeapon,                                                         // kinetic_weapon (1.21.11+)
+		40:  SkipSwingAnimation,                                                        // swing_animation (1.21.11+)
+		41:  SkipEnchantments,                                                          // stored_enchantments
+		42:  SkipInt32,                                                                 // dyed_color
+		43:  SkipInt32,                                                                 // map_color
+		44:  SkipVarInt,                                                                // map_id
+		45:  SkipNBT,                                                                   // map_decorations
+		46:  SkipVarInt,                                                                // map_post_processing
+		47:  SkipFloat32,                                                               // potion_duration_scale
+		48:  func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // charged_projectiles
+		49:  func(r *bytes.Reader) error { return SkipPrefixedArray(r, SkipSlotData) }, // bundle_contents
+		50:  SkipPotionContents,                                                        // potion_contents
+		51:  SkipSuspiciousStewEffects,                                                 // suspicious_stew_effects
+		52:  SkipWritableBookContent,                                                   // writable_book_content
+		53:  SkipWrittenBookContent,                                                    // written_book_content
+		54:  SkipTrim,                                                                  // trim
+		55:  SkipNBT,                                                                   // debug_stick_state
+		56:  SkipEntityData,                                                            // entity_data
+		57:  SkipNBT,                                                                   // bucket_entity_data
+		58:  SkipBlockEntityData,                                                       // block_entity_data
+		59:  SkipInstrument,                                                            // instrument
+		60:  SkipProvidesTrimMaterial,                                                  // provides_trim_material
+		61:  SkipVarInt,                                                                // ominous_bottle_amplifier
+		62:  SkipJukeboxPlayable,                                                       // jukebox_playable
+		63:  SkipString,                                                                // provides_banner_patterns
+		64:  SkipNBT,                                                                   // recipes
+		65:  SkipLodestoneTracker,                                                      // lodestone_tracker
+		66:  SkipFireworkExplosion,                                                     // firework_explosion
+		67:  SkipFireworks,                                                             // fireworks
+		68:  SkipProfile,                                                               // profile
+		69:  SkipString,                                                                // note_block_sound
+		70:  SkipBannerPatterns,                                                        // banner_patterns
+		71:  SkipDyeColor,                                                              // base_color
+		72:  SkipPotDecorations,                                                        // pot_decorations (1.21.11+)
+		73:  SkipContainer,                                                             // container (1.21.11+)
+		74:  SkipBlockState,                                                            // block_state
+		75:  SkipBees,                                                                  // bees
+		76:  SkipNBT,                                                                   // lock
+		77:  SkipNBT,                                                                   // container_loot
+		78:  SkipRegistryValue,                                                         // break_sound (1.21.11+)
+		79:  SkipRegistryValue,                                                         // villager_variant
+		80:  SkipRegistryValue,                                                         // wolf_variant
+		81:  SkipRegistryValue,                                                         // cat_variant
+		82:  SkipRegistryValue,                                                         // frog_variant
+		83:  SkipRegistryValue,                                                         // axolotl_variant
+		84:  SkipRegistryValue,                                                         // paintion_variant
+		85:  SkipRegistryValue,                                                         // shulker_variant
+		86:  SkipRegistryValue,                                                         // goat_variant
+		87:  SkipRegistryValue,                                                         // sniffer_variant
+		88:  SkipRegistryValue,                                                         // ghoul_variant
+		89:  SkipRegistryValue,                                                         // breeze_variant
+		90:  SkipRegistryValue,                                                         // bogged_variant
+		91:  SkipVarInt,                                                                // bundle_remaining_space
+		92:  SkipRegistryValue,                                                         // entity_color
+		93:  SkipNBT,                                                                   // buckable
+		94:  SkipRegistryValue,                                                         // armor_trim
+		95:  SkipNBT,                                                                   // equippable_color
+		96:  SkipNBT,                                                                   // trim_material
+		97:  SkipNBT,                                                                   // trim_pattern
+		98:  SkipNBT,                                                                   // compass_color
+		99:  SkipNBT,                                                                   // map_color
+		100: SkipVarInt,                                                                // frame_type
+		101: SkipRegistryValue,                                                         // banner_pattern
+		102: SkipVarInt,                                                                // base_color
+		103: SkipVarInt,                                                                // color
 	}
 }
 
@@ -698,6 +729,94 @@ func SkipBees(r *bytes.Reader) error {
 			return err
 		}
 		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SkipUseEffects(r *bytes.Reader) error {
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	_, err := ReadFloat32FromReader(r)
+	return err
+}
+
+func SkipRegistryValue(r *bytes.Reader) error {
+	_, err := ReadVarIntFromReader(r)
+	return err
+}
+
+func SkipAttackRange(r *bytes.Reader) error {
+	for i := 0; i < 6; i++ {
+		if _, err := ReadFloat32FromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SkipPiercingWeapon(r *bytes.Reader) error {
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	if err := SkipPrefixedOptional(r, SkipRegistryValue); err != nil {
+		return err
+	}
+	if err := SkipPrefixedOptional(r, SkipRegistryValue); err != nil {
+		return err
+	}
+	return nil
+}
+
+func SkipKineticWeapon(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if err := SkipPrefixedOptional(r, func(r *bytes.Reader) error {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadFloat32FromReader(r); err != nil {
+			return err
+		}
+		_, err := ReadVarIntFromReader(r)
+		return err
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func SkipPotDecorations(r *bytes.Reader) error {
+	for i := 0; i < 4; i++ {
+		if err := SkipPrefixedOptional(r, SkipRegistryValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SkipContainer(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	length, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < length; i++ {
+		if err := SkipSlotData(r); err != nil {
 			return err
 		}
 	}
