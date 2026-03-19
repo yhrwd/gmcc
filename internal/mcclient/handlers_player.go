@@ -233,15 +233,9 @@ func (c *Client) handleEntityDataPacket(data []byte) error {
 func (c *Client) handlePlayerAbilitiesPacket(data []byte) error {
 	r := bytes.NewReader(data)
 
-	allowFlying, err := packet.ReadBoolFromReader(r)
+	flags, err := packet.ReadU8(r)
 	if err != nil {
-		logx.Warnf("player_abilities: 读取 allowFlying 失败: %v", err)
-		return nil
-	}
-
-	creativeMode, err := packet.ReadBoolFromReader(r)
-	if err != nil {
-		logx.Warnf("player_abilities: 读取 creativeMode 失败: %v", err)
+		logx.Warnf("player_abilities: 读取 flags 失败: %v", err)
 		return nil
 	}
 
@@ -251,41 +245,20 @@ func (c *Client) handlePlayerAbilitiesPacket(data []byte) error {
 		return nil
 	}
 
-	flying, err := packet.ReadBoolFromReader(r)
-	if err != nil {
-		logx.Warnf("player_abilities: 读取 flying 失败: %v", err)
-		return nil
-	}
-
-	invulnerable, err := packet.ReadBoolFromReader(r)
-	if err != nil {
-		logx.Warnf("player_abilities: 读取 invulnerable 失败: %v", err)
-		return nil
-	}
-
 	walkSpeed, err := packet.ReadFloat32FromReader(r)
 	if err != nil {
 		logx.Warnf("player_abilities: 读取 walkSpeed 失败: %v", err)
 		return nil
 	}
 
-	flags := int8(0)
-	if invulnerable {
-		flags |= 0x01
-	}
-	if flying {
-		flags |= 0x02
-	}
-	if allowFlying {
-		flags |= 0x04
-	}
-	if creativeMode {
-		flags |= 0x08
-	}
+	invulnerable := (flags & 0x01) != 0
+	flying := (flags & 0x02) != 0
+	canFly := (flags & 0x04) != 0
+	creativeMode := (flags & 0x08) != 0
 
-	c.Player.UpdateAbilities(flags, flySpeed, walkSpeed)
+	c.Player.UpdateAbilities(int8(flags), flySpeed, walkSpeed)
 
-	logx.Infof("player_abilities: allowFlying=%v, creativeMode=%v, flySpeed=%.2f, flying=%v, invulnerable=%v, walkSpeed=%.2f",
-		allowFlying, creativeMode, flySpeed, flying, invulnerable, walkSpeed)
+	logx.Infof("player_abilities: invulnerable=%v, flying=%v, canFly=%v, creativeMode=%v, flySpeed=%.2f, walkSpeed=%.2f",
+		invulnerable, flying, canFly, creativeMode, flySpeed, walkSpeed)
 	return nil
 }

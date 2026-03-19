@@ -17,7 +17,7 @@ import (
 )
 
 // DEBUG_MODE: 临时关闭背包解析，将原始包dump到文件
-const DEBUG_DUMP_CONTAINER_PACKETS = true
+const DEBUG_DUMP_CONTAINER_PACKETS = false
 
 const (
 	ContainerTypePlayer    int32 = 0
