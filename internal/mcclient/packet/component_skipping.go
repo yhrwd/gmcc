@@ -122,11 +122,22 @@ func init() {
 
 func SkipComponentByType(r *bytes.Reader, componentType int32) error {
 	if skipper, ok := componentSkippers[componentType]; ok {
-		return skipper(r)
+		err := skipper(r)
+		if err != nil && err.Error() == "unexpected EOF" {
+			return nil
+		}
+		return err
 	}
 	// 未知组件：尝试跳过为NBT（常见情况）
 	logx.Warnf("未知组件类型: %d, 尝试NBT跳过", componentType)
-	return SkipNBT(r)
+	if r.Len() == 0 {
+		return nil
+	}
+	err := SkipNBT(r)
+	if err != nil && err.Error() == "unexpected EOF" {
+		return nil
+	}
+	return err
 }
 
 func SkipNothing(r *bytes.Reader) error {
@@ -158,7 +169,13 @@ func SkipPrefixedArray(r *bytes.Reader, fn func(*bytes.Reader) error) error {
 		return err
 	}
 	for i := int32(0); i < length; i++ {
+		if r.Len() == 0 {
+			return nil
+		}
 		if err := fn(r); err != nil {
+			if err.Error() == "unexpected EOF" {
+				return nil
+			}
 			return err
 		}
 	}

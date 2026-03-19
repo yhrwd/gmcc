@@ -219,8 +219,15 @@ func SkipSlotComponents(r *bytes.Reader) error {
 
 // SkipNBT 跳过 Network NBT 格式 (无 name 字段)
 func SkipNBT(r *bytes.Reader) error {
+	if r.Len() == 0 {
+		return nil
+	}
 	dec := nbt.NewDecoder(r).NetworkFormat(true)
-	return dec.Skip()
+	err := dec.Skip()
+	if err != nil && err.Error() == "unexpected EOF" {
+		return nil
+	}
+	return err
 }
 
 // ReadAnonymousNBTJSON 解析 Network NBT 并返回 JSON 字符串
