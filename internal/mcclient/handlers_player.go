@@ -47,14 +47,14 @@ func (c *Client) handleSetExperiencePacket(data []byte) error {
 		logx.PacketError("set_experience", data, err)
 		return nil
 	}
-	totalExp, err := packet.ReadVarIntFromReader(r)
-	if err != nil {
-		logx.PacketError("set_experience", data, fmt.Errorf("读取 totalExp 失败: %w", err))
-		return nil
-	}
 	level, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("set_experience", data, fmt.Errorf("读取 level 失败: %w", err))
+		return nil
+	}
+	totalExp, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		logx.PacketError("set_experience", data, fmt.Errorf("读取 totalExp 失败: %w", err))
 		return nil
 	}
 
