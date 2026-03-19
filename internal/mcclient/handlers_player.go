@@ -13,15 +13,15 @@ import (
 func (c *Client) handleSetHealthPacket(data []byte) error {
 	r := bytes.NewReader(data)
 
-	food, err := packet.ReadVarIntFromReader(r)
-	if err != nil {
-		logx.PacketError("set_health", data, fmt.Errorf("读取 food 失败: %w", err))
-		return nil
-	}
-
 	var health float32
 	if err := binary.Read(r, binary.BigEndian, &health); err != nil {
 		logx.PacketError("set_health", data, err)
+		return nil
+	}
+
+	food, err := packet.ReadVarIntFromReader(r)
+	if err != nil {
+		logx.PacketError("set_health", data, fmt.Errorf("读取 food 失败: %w", err))
 		return nil
 	}
 
