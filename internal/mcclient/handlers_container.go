@@ -60,34 +60,34 @@ func (c *Client) handleOpenScreenPacket(data []byte) error {
 	if err != nil {
 		return err
 	}
-	syncId, err := packet.ReadVarIntFromReader(r)
+	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
 
 	c.Player.SetOpenContainer(&player.ContainerState{
-		WindowID:   syncId,
+		WindowID:   containerId,
 		WindowType: screenHandlerId,
 		Open:       true,
 	})
 
-	logx.Infof("open_screen: syncId=%d, screenHandlerId=%d, name=%s", syncId, screenHandlerId, name)
+	logx.Infof("open_screen: containerId=%d, screenHandlerId=%d, name=%s", containerId, screenHandlerId, name)
 	return nil
 }
 
 func (c *Client) handleContainerClosePacket(data []byte) error {
 	r := bytes.NewReader(data)
-	syncId, err := packet.ReadVarIntFromReader(r)
+	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
 
 	container := c.Player.GetOpenContainer()
-	if container != nil && container.WindowID == syncId {
+	if container != nil && container.WindowID == containerId {
 		c.Player.SetOpenContainer(nil)
 	}
 
-	logx.Debugf("container_close: syncId=%d", syncId)
+	logx.Debugf("container_close: containerId=%d", containerId)
 	return nil
 }
 
@@ -97,7 +97,7 @@ func (c *Client) handleContainerSetDataPacket(data []byte) error {
 	if err != nil {
 		return err
 	}
-	syncId, err := packet.ReadVarIntFromReader(r)
+	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
@@ -106,23 +106,22 @@ func (c *Client) handleContainerSetDataPacket(data []byte) error {
 		return err
 	}
 
-	logx.Debugf("container_set_data: syncId=%d, propertyId=%d, value=%d", syncId, propertyId, value)
+	logx.Debugf("container_set_data: containerId=%d, propertyId=%d, value=%d", containerId, propertyId, value)
 	return nil
 }
 
 func (c *Client) handleContainerContentPacket(data []byte) error {
-	// DEBUG: 完全dump背包内容包到文件，暂时关闭解析
 	if DEBUG_DUMP_CONTAINER_PACKETS {
 		return c.dumpContainerPacket("container_content", data)
 	}
 
 	r := bytes.NewReader(data)
-	syncId, err := packet.ReadVarIntFromReader(r)
+	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("container_content", data, err)
-		return fmt.Errorf("container_content: 读取 syncId 失败: %w", err)
+		return fmt.Errorf("container_content: 读取 containerId 失败: %w", err)
 	}
-	stateID, err := packet.ReadVarIntFromReader(r)
+	stateId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("container_content", data, err)
 		return nil
@@ -133,9 +132,9 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 		return nil
 	}
 
-	c.Player.UpdateContainerStateID(stateID)
+	c.Player.UpdateContainerStateID(stateId)
 
-	logx.Infof("container_content: syncId=%d, stateID=%d, numItems=%d, remaining=%d bytes", syncId, stateID, numItems, r.Len())
+	logx.Infof("container_content: containerId=%d, stateId=%d, numItems=%d, remaining=%d bytes", containerId, stateId, numItems, r.Len())
 
 	if numItems > 1000 {
 		logx.Warnf("container_content: numItems 过大 (%d), 限制为 1000", numItems)
@@ -172,7 +171,7 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 		logx.Infof("container_content: carried item: id=%d (%s), count=%d", carriedItem.ID, itemName, carriedItem.Count)
 	}
 
-	c.Player.UpdateInventory(syncId, items, carried)
+	c.Player.UpdateInventory(containerId, items, carried)
 	return nil
 }
 
@@ -220,18 +219,17 @@ func (c *Client) dumpContainerPacket(packetName string, data []byte) error {
 }
 
 func (c *Client) handleContainerSlotPacket(data []byte) error {
-	// DEBUG: 完全dump背包槽位包到文件，暂时关闭解析
 	if DEBUG_DUMP_CONTAINER_PACKETS {
 		return c.dumpContainerPacket("container_slot", data)
 	}
 
 	r := bytes.NewReader(data)
-	syncId, err := packet.ReadVarIntFromReader(r)
+	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("container_slot", data, err)
 		return nil
 	}
-	stateID, err := packet.ReadVarIntFromReader(r)
+	stateId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		logx.PacketError("container_slot", data, err)
 		return nil
@@ -243,9 +241,9 @@ func (c *Client) handleContainerSlotPacket(data []byte) error {
 		return nil
 	}
 
-	c.Player.UpdateContainerStateID(stateID)
+	c.Player.UpdateContainerStateID(stateId)
 
-	item, err := packet.ReadSlotData(r)
+	itemStack, err := packet.ReadSlotData(r)
 	if err != nil {
 		logx.PacketError("container_slot", data, fmt.Errorf("slot %d: %w", slot, err))
 		return nil
@@ -253,16 +251,16 @@ func (c *Client) handleContainerSlotPacket(data []byte) error {
 
 	reg := registry.GetItemRegistry()
 	var slotItem *player.SlotData
-	if item != nil {
-		slotItem = &player.SlotData{ID: item.ID, Count: item.Count}
-		itemName := reg.IDToName(item.ID)
-		localizedName := reg.LocalizedName(item.ID)
-		logx.Infof("container_slot: syncId=%d, stateID=%d, slot=%d, item_id=%d (%s), name=%s, count=%d", syncId, stateID, slot, item.ID, itemName, localizedName, item.Count)
+	if itemStack != nil {
+		slotItem = &player.SlotData{ID: itemStack.ID, Count: itemStack.Count}
+		itemName := reg.IDToName(itemStack.ID)
+		localizedName := reg.LocalizedName(itemStack.ID)
+		logx.Infof("container_slot: containerId=%d, stateId=%d, slot=%d, item_id=%d (%s), name=%s, count=%d", containerId, stateId, slot, itemStack.ID, itemName, localizedName, itemStack.Count)
 	} else {
-		logx.Debugf("container_slot: syncId=%d, stateID=%d, slot=%d, item=empty", syncId, stateID, slot)
+		logx.Debugf("container_slot: containerId=%d, stateId=%d, slot=%d, item=empty", containerId, stateId, slot)
 	}
 
-	c.Player.UpdateSlot(syncId, int32(slot), slotItem)
+	c.Player.UpdateSlot(containerId, int32(slot), slotItem)
 	return nil
 }
 

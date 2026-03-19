@@ -239,15 +239,15 @@ func (c *Client) handlePlayerAbilitiesPacket(data []byte) error {
 		return nil
 	}
 
-	flySpeed, err := packet.ReadFloat32FromReader(r)
+	flyingSpeed, err := packet.ReadFloat32FromReader(r)
 	if err != nil {
-		logx.Warnf("player_abilities: 读取 flySpeed 失败: %v", err)
+		logx.Warnf("player_abilities: 读取 flyingSpeed 失败: %v", err)
 		return nil
 	}
 
-	walkSpeed, err := packet.ReadFloat32FromReader(r)
+	walkingSpeed, err := packet.ReadFloat32FromReader(r)
 	if err != nil {
-		logx.Warnf("player_abilities: 读取 walkSpeed 失败: %v", err)
+		logx.Warnf("player_abilities: 读取 walkingSpeed 失败: %v", err)
 		return nil
 	}
 
@@ -256,9 +256,9 @@ func (c *Client) handlePlayerAbilitiesPacket(data []byte) error {
 	canFly := (flags & 0x04) != 0
 	creativeMode := (flags & 0x08) != 0
 
-	c.Player.UpdateAbilities(int8(flags), flySpeed, walkSpeed)
+	c.Player.UpdateAbilities(int8(flags), flyingSpeed, walkingSpeed)
 
-	logx.Infof("player_abilities: invulnerable=%v, flying=%v, canFly=%v, creativeMode=%v, flySpeed=%.2f, walkSpeed=%.2f",
-		invulnerable, flying, canFly, creativeMode, flySpeed, walkSpeed)
+	logx.Infof("player_abilities: invulnerable=%v, flying=%v, canFly=%v, creativeMode=%v, flyingSpeed=%.2f, walkingSpeed=%.2f",
+		invulnerable, flying, canFly, creativeMode, flyingSpeed, walkingSpeed)
 	return nil
 }
