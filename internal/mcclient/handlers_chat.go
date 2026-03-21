@@ -17,6 +17,7 @@ func (c *Client) handleSystemChatPacket(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("解析 system_chat 内容失败: %w", err)
 	}
+	logx.Debugf("[RAW JSON] system_chat: %s", rawJSON)
 	isActionBar, err := packet.ReadBool(r)
 	if err != nil {
 		return fmt.Errorf("解析 system_chat actionBar 标记失败: %w", err)
@@ -42,6 +43,7 @@ func (c *Client) handleActionBarPacket(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("解析 action_bar 内容失败: %w", err)
 	}
+	logx.Debugf("[RAW JSON] action_bar: %s", rawJSON)
 	c.emitChat(ChatMessage{
 		Type:        "action_bar",
 		PlainText:   chat.ExtractPlainTextFromChatJSON(rawJSON),
@@ -58,6 +60,7 @@ func (c *Client) handleProfilelessChatPacket(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("解析 profileless_chat 内容失败: %w", err)
 	}
+	logx.Debugf("[RAW JSON] profileless_chat: %s", rawJSON)
 	c.emitChat(ChatMessage{
 		Type:       "profileless_chat",
 		PlainText:  chat.ExtractPlainTextFromChatJSON(rawJSON),
@@ -128,6 +131,7 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 			return fmt.Errorf("解析 player_chat unsignedChatContent 失败: %w", err)
 		}
 	}
+	logx.Debugf("[RAW JSON] player_chat: %s", rawJSON)
 
 	c.emitChat(ChatMessage{
 		Type:       "player_chat",
