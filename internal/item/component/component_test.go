@@ -1,6 +1,7 @@
 package component
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -17,15 +18,16 @@ func TestNewParser(t *testing.T) {
 func TestParseComponent(t *testing.T) {
 	parser := NewParser()
 
-	// 测试解析一个组件
-	result, err := parser.ParseComponent(0, nil)
+	// 测试解析VarInt组件
+	r := bytes.NewReader([]byte{0x01})
+	result, err := parser.ParseComponent(1, r)
 	if err != nil {
 		t.Errorf("ParseComponent() error = %v", err)
 	}
 	if result == nil {
 		t.Error("ParseComponent() = nil, want non-nil")
 	}
-	if result.TypeID != 0 {
-		t.Errorf("ParseComponent() TypeID = %d, want 0", result.TypeID)
+	if result.TypeID != 1 {
+		t.Errorf("ParseComponent() TypeID = %d, want 1", result.TypeID)
 	}
 }

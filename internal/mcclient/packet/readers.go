@@ -158,15 +158,8 @@ func ReadBytes(r io.Reader, n int) ([]byte, error) {
 	return b, nil
 }
 
-// ReadSlotData 使用 internal/item 的实现
+// ReadSlotData 使用新的内部实现
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
-	// TODO: 完成组件解析后更新为使用新的实现
-	// 现在使用临时实现
-	return readSlotDataInternal(r)
-}
-
-// 内部实现，避免循环依赖
-func readSlotDataInternal(r *bytes.Reader) (*SlotData, error) {
 	// 1. item_count (VarInt)
 	count, err := ReadVarIntFromReader(r)
 	if err != nil {
@@ -182,15 +175,20 @@ func readSlotDataInternal(r *bytes.Reader) (*SlotData, error) {
 		return nil, err
 	}
 
-	// 3. 跳过components
+	// 3. 跳过components (暂时使用旧逻辑)
 	if err := SkipSlotComponents(r); err != nil {
 		logx.Warnf("Slot解析失败: itemID=%d, count=%d, err=%v", itemID, count, err)
 		return nil, err
 	}
 
-	// 4. 返回结果
 	return &SlotData{ID: itemID, Count: count}, nil
 }
+
+// 内部实现，将在阶段3后完全移除
+// func internalReadSlotData(r *bytes.Reader) (*SlotData, error) {
+// 	// 这里将在阶段3中实现新的组件解析系统集成
+// 	return nil, nil
+// }
 
 // SkipSlotComponents 跳过物品组件 (1.21.11)
 // 结构: addComponentPatchesCount(VarInt) -> removeComponentPatchesCount(VarInt) ->

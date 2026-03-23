@@ -1,5 +1,12 @@
 package component
 
+import (
+	"bytes"
+	"fmt"
+
+	"gmcc/internal/mcclient/packet"
+)
+
 // ComponentResult 组件解析结果
 type ComponentResult struct {
 	TypeID int32 // 组件类型ID
@@ -7,7 +14,7 @@ type ComponentResult struct {
 }
 
 // ComponentHandler 组件处理器函数类型
-type ComponentHandler func(typeID int32, r any) (*ComponentResult, error)
+type ComponentHandler func(typeID int32, r *bytes.Reader) (*ComponentResult, error)
 
 // Parser 组件解析器
 type Parser struct {
@@ -27,10 +34,13 @@ func (p *Parser) RegisterHandler(typeID int32, handler ComponentHandler) {
 }
 
 // ParseComponent 解析单个组件
-func (p *Parser) ParseComponent(typeID int32, r any) (*ComponentResult, error) {
+func (p *Parser) ParseComponent(typeID int32, r *bytes.Reader) (*ComponentResult, error) {
 	if handler, ok := p.handlers[typeID]; ok {
 		return handler(typeID, r)
 	}
-	// 未知组件：返回仅包含TypeID的结果
+	// 未知组件：尝试作为 NBT 跳过并返回TypeID结果
+	if err := packet.SkipNBT(r); err != nil {
+		return nil, fmt.Errorf("parse unknown component %d as NBT: %w", typeID, err)
+	}
 	return &ComponentResult{TypeID: typeID}, nil
 }
