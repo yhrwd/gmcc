@@ -13,6 +13,11 @@
 
 当前系统使用 `component_skipping.go` 来跳过物品槽中的组件数据。这种方式虽然能避免解析错误，但丢弃了所有组件信息，无法支持后续功能（如显示物品自定义名称、附魔、容器内容等）。
 
+同时，代码结构存在以下问题：
+- 工具类分散在多个包中，部分可复用工具与Minecraft客户端紧耦合
+- 聊天处理流程依赖内部日志和国际化，难以复用和测试
+- 缺少统一的数据获取策略
+
 ### 1.2 目标
 
 将组件处理从"跳过"改为"可扩展的解析"：
@@ -20,11 +25,17 @@
 - **可扩展**: 通过注册表模式，后续可为特定组件类型添加实际解析逻辑
 - **容器组件**: 预留特殊处理机制
 
+**架构优化目标：**
+- **工具类提取**: 将通用工具移至 `pkg/` 供其他模块复用
+- **聊天解耦**: 移除聊天处理对内部包（i18n/logx）的硬依赖
+- **数据标准化**: 建立明确的数据获取优先级策略
+
 ### 1.3 非目标
 
 - 不一次性实现所有组件类型的解析
 - 不保留未解析组件的原始字节
 - 不修改容器处理逻辑的主体架构
+- 不重构协议常量定义（保持在 `internal/mcclient/protocol/`）
 
 ---
 
@@ -539,3 +550,239 @@ func init() {
 - 实现具体组件解析器时，在 `internal/item/component/` 添加新文件
 - 使用 `binutil` 中的基础读取函数处理二进制数据
 - 通过 `component.SetContainerCallback()` 实现容器内容处理
+
+---
+
+## 附录A: 数据获取优先级策略
+
+### A.1 原则
+
+**优先级（从高到低）：**
+
+1. **Minecraft Wiki (wiki.vg)** - 协议规范的主要来源
+   - URL: https://wiki.vg/Protocol
+   - 权威性高，更新及时
+   - 优先用于协议常量、数据包格式、字段定义
+
+2. **官方 Minecraft 源代码/文档** - 权威参考
+   - 通过反编译或官方发布的 obfuscation maps
+   - 用于验证协议细节和数据类型
+
+3. **PrismarineJS 库** - 社区实现参考
+   - node-minecraft-protocol 等库的实现
+   - 用于验证数据包处理逻辑
+   - 注意：版本可能与目标版本不完全一致
+
+4. **第三方数据资源** - 辅助参考
+   - 社区维护的 protocol.json 文件
+   - 其他开源客户端实现
+   - 仅作为补充验证，不作为主要依据
+
+5. **实际网络抓包** - 最终验证
+   - 使用实际服务器通信数据进行验证
+   - 用于确认实现正确性
+   - 不作为设计阶段的参考
+
+### A.2 组件类型定义来源
+
+**Data Components 定义：**
+- **主要来源**: Minecraft Wiki (Data Components 页面)
+- **辅助来源**: 游戏内 `/data` 命令输出
+- **验证方式**: 对比 `.knowledge/1.21.11/types/components.json`
+
+**组件ID映射表：**
+- 使用 wiki.vg 定义的 raw ID 映射
+- 版本: 1.21.11 (协议 774)
+- ID 范围: 0-103
+
+### A.3 更新策略
+
+当 Minecraft 版本更新时：
+1. 首先检查 wiki.vg 协议更新
+2. 对比新旧版本组件 ID 映射变化
+3. 更新 `discardFunctions` 映射表
+4. 在测试服务器验证解析正确性
+
+---
+
+## 附录B: 工具类重构建议
+
+### B.1 可移动的工具类清单
+
+#### 1. CFB8 加密 → pkg/crypto/cfb8/
+
+**当前位置**: `internal/mcclient/crypto/cfb8.go`
+
+**移动理由**:
+- 纯加密算法实现，无 Minecraft 特定逻辑
+- 可独立复用，符合 `pkg/` 包的通用性要求
+- 仅依赖标准库 `crypto/cipher`
+
+**新位置**:
+```
+pkg/crypto/cfb8/
+├── cfb8.go          # 原有实现
+└── cfb8_test.go     # 对应测试
+```
+
+**依赖修改**:
+```go
+// internal/mcclient/packet/codec.go
+import "gmcc/pkg/crypto/cfb8"  // 修改前: internal/mcclient/crypto
+```
+
+#### 2. VarInt 工具 → pkg/mcutil/varint.go
+
+**当前位置**: `internal/mcclient/packet/codec.go` (内嵌)
+
+**移动理由**:
+- VarInt 是 Minecraft 协议的基础类型
+- 多个模块可能需要（packet, protocol, item）
+- 独立后便于测试和复用
+
+**新位置**:
+```
+pkg/mcutil/
+├── varint.go        # ReadVarInt, WriteVarInt, VarIntSize
+└── varint_test.go
+```
+
+#### 3. UUID 工具 → pkg/mcutil/uuid.go
+
+**当前位置**: `internal/mcclient/packet/utils.go`
+
+**提取函数**:
+- `ParseUUID()` - 从字符串解析 UUID
+- `FormatUUID()` - 格式化 UUID 为字符串
+- `OfflineUUID()` - 生成离线玩家 UUID
+- `UUIDToBytes()` - UUID 转字节数组
+
+**新位置**:
+```
+pkg/mcutil/uuid.go
+```
+
+#### 4. NBT 处理 → pkg/nbt/
+
+**当前位置**: `internal/nbt/`
+
+**移动理由**:
+- NBT 是 Minecraft 通用数据格式
+- 完整的编码/解码/SNBT 解析实现
+- 可被其他项目复用
+
+**新位置**:
+```
+pkg/nbt/
+├── decode.go
+├── encode.go
+├── nbt.go
+├── path.go
+├── raw.go
+├── snbt.go
+└── *_test.go
+```
+
+**注意**: 移动时需移除对 `internal/logx` 的依赖，改用 error 返回。
+
+#### 5. CESU8 工具 → pkg/nbt/cesu8.go
+
+**当前位置**: `internal/nbt/decode.go:739-782`
+
+**提取函数**:
+- `CESU8ToUTF8()` - 当前存在，改为公开
+- `UTF8ToCESU8()` - 新增（目前缺失）
+
+**用途**: Minecraft 字符串编码（协议中使用）
+
+### B.2 聊天处理解耦
+
+#### 当前问题
+
+**文件**: `internal/mcclient/chat/chat_parser.go:8`
+```go
+import "gmcc/internal/logx"
+```
+
+**紧耦合点**:
+1. `ExtractPlainTextFromChatJSON()` 调用 `logx.Debugf()`
+2. `text_component.go` 直接调用 `i18n.Translate()`
+3. TUI 直接依赖 `mcclient` 和 `chat` 包
+
+#### 解耦方案
+
+**方案1: 使用接口注入**
+
+```go
+// internal/mcclient/chat/interfaces.go
+package chat
+
+// Logger 可选调试日志接口
+type Logger interface {
+    Debugf(format string, args ...any)
+}
+
+// Translator 本地化翻译接口
+type Translator interface {
+    Translate(key string, args ...any) string
+}
+
+// ParserOptions 解析器选项
+type ParserOptions struct {
+    Logger     Logger
+    Translator Translator
+}
+```
+
+**方案2: 返回值替代副作用**
+
+```go
+// 当前（副作用）:
+func ExtractPlainText(json []byte) string {
+    // 内部调用 logx.Debugf
+}
+
+// 优化（无副作用）:
+func ExtractPlainText(json []byte) (string, error) {
+    // 返回错误，调用者决定是否记录
+}
+```
+
+#### 实施步骤
+
+1. 在 `chat` 包定义 `ParserOptions` 结构体
+2. 修改 `TextComponent.ToPlain()` 接收可选 `Translator` 参数
+3. 移除 `chat_parser.go` 的 `logx` 导入
+4. TUI 层注入 translator 和 logger
+5. 保持向后兼容（nil 参数时使用默认行为）
+
+### B.3 重构后包结构
+
+```
+gmcc/
+├── cmd/gmcc/
+├── internal/
+│   ├── mcclient/
+│   │   ├── chat/           # 解耦后的聊天处理
+│   │   └── packet/         # 使用pkg工具
+│   └── ...其他/
+└── pkg/                    # 公共可复用工具
+    ├── binutil/            # 二进制读写（本设计新增）
+    ├── crypto/
+    │   └── cfb8/           # CFB8加密
+    ├── mcutil/             # Minecraft通用工具
+    │   ├── uuid.go
+    │   └── varint.go
+    └── nbt/                # NBT处理（从internal移出）
+```
+
+### B.4 迁移优先级
+
+| 优先级 | 包/功能 | 理由 |
+|--------|---------|------|
+| P0 | binutil | 本设计依赖，必须先实现 |
+| P1 | crypto/cfb8 | 独立性强，无依赖风险 |
+| P2 | mcutil/varint | packet 重构需要 |
+| P2 | mcutil/uuid | 多个地方使用 |
+| P3 | nbt/ | 依赖较多，需要分阶段迁移 |
+| P3 | chat解耦 | 影响 TUI，可后续优化 |
