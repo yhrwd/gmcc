@@ -559,49 +559,84 @@ func init() {
 
 **优先级（从高到低）：**
 
-1. **Minecraft Wiki (wiki.vg)** - 协议规范的主要来源
-   - URL: https://wiki.vg/Protocol
-   - 权威性高，更新及时
-   - 优先用于协议常量、数据包格式、字段定义
+1. **Minecraft Wiki (zh.minecraft.wiki)** - 协议规范的主要来源
+   - URL: https://zh.minecraft.wiki/
+   - 所有页面索引: https://zh.minecraft.wiki/w/Special:AllPages
+   - **注意**: 确认页面版本是否为 **1.21.11**（或兼容版本）
+   - 搜索关键词: "Data Components", "Protocol", "Item Format"
 
-2. **官方 Minecraft 源代码/文档** - 权威参考
+2. **go-mc 参考实现** - Tnze/go-mc 项目
+   - 位置: `../go-mc/level/component/`
+   - 组件接口设计、序列化模式
+   - 注意：版本可能略有差异，需与 wiki 核对
+
+3. **官方 Minecraft 源代码/文档** - 权威参考
    - 通过反编译或官方发布的 obfuscation maps
    - 用于验证协议细节和数据类型
 
-3. **PrismarineJS 库** - 社区实现参考
-   - node-minecraft-protocol 等库的实现
-   - 用于验证数据包处理逻辑
-   - 注意：版本可能与目标版本不完全一致
-
 4. **第三方数据资源** - 辅助参考
+   - PrismarineJS 库的实现
    - 社区维护的 protocol.json 文件
-   - 其他开源客户端实现
    - 仅作为补充验证，不作为主要依据
 
 5. **实际网络抓包** - 最终验证
    - 使用实际服务器通信数据进行验证
    - 用于确认实现正确性
-   - 不作为设计阶段的参考
+   - 不作为设计阶段的主要参考
+
+**重要提示**: 原 wiki.vg 已闭站，现使用 https://zh.minecraft.wiki/ 作为主要参考来源。
 
 ### A.2 组件类型定义来源
 
 **Data Components 定义：**
-- **主要来源**: Minecraft Wiki (Data Components 页面)
-- **辅助来源**: 游戏内 `/data` 命令输出
+- **主要来源**: Minecraft Wiki (zh.minecraft.wiki - Data Components 页面)
+- **参考实现**: go-mc (Tnze/go-mc) 的 `level/component/` 包
+  - 提供组件接口设计、ID 映射、序列化方法
+  - 组件数量：~40 个已实现（1.20+ 版本）
+  - **ID 映射注意**: go-mc 的 ID 顺序可能与 1.21.11 有差异，需对照 wiki
 - **验证方式**: 对比 `.knowledge/1.21.11/types/components.json`
 
 **组件ID映射表：**
-- 使用 wiki.vg 定义的 raw ID 映射
+- 使用 wiki 定义的 raw ID 映射
 - 版本: 1.21.11 (协议 774)
 - ID 范围: 0-103
+- **go-mc 参考**: 查看 `go-mc/level/component/components.go` 中的 NewComponent() switch 语句
 
-### A.3 更新策略
+### A.3 参考实现对比
+
+**go-mc 组件结构 (参考):**
+
+```go
+// go-mc/level/component/components.go
+type DataComponent interface {
+    pk.Field           // 实现 ReadFrom/WriteTo
+    ID() string        // 返回组件名称如 "minecraft:custom_name"
+}
+
+// 示例: CustomName 组件
+type CustomName struct {
+    Name chat.Message
+}
+
+func (CustomName) ID() string { return "minecraft:custom_name" }
+func (c *CustomName) ReadFrom(r io.Reader) (n int64, err error) {
+    return c.Name.ReadFrom(r)
+}
+```
+
+**本设计差异:**
+- go-mc: 每个组件是一个完整类型，实现序列化接口
+- 本设计: 使用处理器函数映射表，更轻量，适合"先丢弃后实现"策略
+- 两者都支持 ID 到处理器的映射
+
+### A.4 更新策略
 
 当 Minecraft 版本更新时：
-1. 首先检查 wiki.vg 协议更新
-2. 对比新旧版本组件 ID 映射变化
-3. 更新 `discardFunctions` 映射表
-4. 在测试服务器验证解析正确性
+1. 首先检查 zh.minecraft.wiki 的 Data Components 页面更新
+2. 参考 go-mc 的组件实现作为结构参考
+3. 对比新旧版本组件 ID 映射变化
+4. 更新 `discardFunctions` 映射表
+5. 在测试服务器验证解析正确性
 
 ---
 
