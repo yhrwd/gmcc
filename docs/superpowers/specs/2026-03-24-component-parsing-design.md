@@ -588,7 +588,21 @@ func init() {
 
 **重要提示**: 原 wiki.vg 已闭站，现使用 https://zh.minecraft.wiki/ 作为主要参考来源。
 
-### A.2 组件类型定义来源
+### A.2 项目知识库文档
+
+本地知识库存放在 `docs/` 目录下，作为开发参考：
+
+| 文档 | 路径 | 内容说明 | 数据来源 |
+|------|------|---------|---------|
+| 数据组件规范 | `docs/data_components_1.21.11.md` | 组件类型定义、Slot格式、背包映射 | [Minecraft Wiki - 数据组件](https://zh.minecraft.wiki/w/%E6%95%B0%E6%8D%AE%E7%BB%84%E4%BB%B6) |
+| 文本组件规范 | `docs/text_component.md` | 聊天消息、文本格式、样式 | [Minecraft Wiki - 文本组件](https://zh.minecraft.wiki/w/%E6%96%87%E6%9C%AC%E7%BB%84%E4%BB%B6) |
+| NBT格式规范 | `docs/nbt_format.md` | NBT二进制格式、标签类型 | [Minecraft Wiki - NBT格式](https://zh.minecraft.wiki/w/NBT%E6%A0%BC%E5%BC%8F) |
+| SNBT格式规范 | `docs/snbt_format.md` | 字符串化NBT语法 | [Minecraft Wiki - SNBT格式](https://zh.minecraft.wiki/w/SNBT%E6%A0%BC%E5%BC%8F) |
+| 协议文档 | `docs/protocol.md` | 协议版本、数据包格式 | [Minecraft Wiki - Java版协议](https://zh.minecraft.wiki/w/Java_Edition_protocol) |
+
+**维护责任**: 当Minecraft版本更新时，需要同步更新以上文档。
+
+### A.3 组件类型定义来源
 
 **Data Components 定义：**
 - **主要来源**: Minecraft Wiki (zh.minecraft.wiki - Data Components 页面)
@@ -637,14 +651,15 @@ func (c *CustomName) ReadFrom(r io.Reader) (n int64, err error) {
 - 本设计: 使用处理器函数映射表，更轻量，适合"先丢弃后实现"策略
 - 两者都支持 ID 到处理器的映射
 
-### A.4 更新策略
+### A.5 更新策略
 
 当 Minecraft 版本更新时：
 1. 首先检查 zh.minecraft.wiki 的 Data Components 页面更新
-2. 参考 go-mc 的组件实现作为结构参考
-3. 对比新旧版本组件 ID 映射变化
-4. 更新 `discardFunctions` 映射表
-5. 在测试服务器验证解析正确性
+2. 同步更新 `docs/` 目录下的知识库文档
+3. 参考 go-mc 的组件实现作为结构参考
+4. 对比新旧版本组件 ID 映射变化
+5. 更新 `discardFunctions` 映射表
+6. 在测试服务器验证解析正确性
 
 ---
 
@@ -1233,9 +1248,237 @@ require golang.org/x/sys v0.29.0 // indirect
 
 ---
 
-### D.6 文档维护责任
+### D.7 .knowledge/ 目录详解
 
-**本设计文档维护者**: gmcc agent
-**最后更新**: 2026-03-24
-**检查周期**: 每个Minecraft小版本发布时
-**数据来源验证**: 每次更新时重新核对wiki页面
+**.knowledge/** 目录是本地知识库，包含Minecraft协议数据处理相关的完整参考数据。
+
+#### 目录结构
+
+```
+.knowledge/
+├── README.md                    # 知识库索引和使用说明
+├── links.md                     # 外部链接集合
+├── components.json              # 组件数据（104个）
+├── 1.21.11/                    # 1.21.11版本协议数据
+│   ├── README.md               # 数据集说明
+│   ├── manifest.json           # 文件清单和元数据
+│   ├── protocol.json           # 完整协议索引（251个数据包）
+│   ├── summary.json            # 数据摘要统计
+│   ├── warnings.json           # 提取警告信息
+│   ├── packets/                # 各阶段数据包定义
+│   │   ├── play_clientbound.json
+│   │   ├── play_serverbound.json
+│   │   ├── login_clientbound.json
+│   │   └── login_serverbound.json
+│   └── types/                  # 类型定义
+│       ├── components.json     # 组件类型完整定义（rawId 0-103）
+│       ├── nbt.json            # NBT类型定义
+│       └── text_components.json # 文本组件类型定义
+├── MC_Protocol_Data/           # MC_Dissector协议解析器数据
+│   └── java_edition/
+├── minecraft-data/             # PrismarineJS游戏数据
+│   └── data/
+├── prismarine-chat/            # 聊天组件解析库（Node.js）
+├── prismarine-nbt/             # NBT解析库（Node.js）
+└── mineflayer/                 # Mineflayer机器人库文档
+```
+
+#### 关键文件详解
+
+**1.21.11/types/components.json**
+
+组件类型完整定义，包含104个组件：
+
+| 字段 | 说明 |
+|------|------|
+| rawId | 组件注册表ID（0-103） |
+| name | 组件枚举名称 |
+| id | 完整命名空间ID（如minecraft:custom_name） |
+| codecClass | Java编解码器类名 |
+| valueStructure | 值结构定义（JSON Schema） |
+
+**示例 - CustomName组件：**
+
+```json
+{
+  "rawId": 6,
+  "name": "CUSTOM_NAME",
+  "id": "minecraft:custom_name",
+  "codecClass": "net.minecraft.network.codec.PacketCodec",
+  "valueStructure": {
+    "kind": "text_component",
+    "javaType": "net.minecraft.text.Text",
+    "ref": "types/text_components.json#text_component"
+  }
+}
+```
+
+**1.21.11/packets/play_clientbound.json**
+
+游戏阶段客户端接收包（139个），包含：
+- container_content (0x12)
+- container_slot (0x14)
+- open_screen (0x39)
+- container_close (0x11)
+
+每个数据包包含完整的structure定义。
+
+#### 数据来源说明
+
+**1.21.11/ 数据集**
+- **生成时间**: 2026-03-18
+- **生成工具**: 从Minecraft JAR反编译提取
+- **Minecraft版本**: 1.21.11
+- **协议版本**: 774
+- **组件数量**: 104
+- **数据包数量**: 251
+
+**PrismarineJS项目**
+- **License**: MIT
+- **仓库**: https://github.com/PrismarineJS/
+- **用途**: Node.js Minecraft协议库参考
+- **包含**: minecraft-data, prismarine-chat, prismarine-nbt
+
+**MC_Protocol_Data**
+- **来源**: https://github.com/Nickid2018/MC_Protocol_Data
+- **用途**: Wireshark协议解析器
+- **License**: MIT
+
+#### 使用建议
+
+**开发时查阅顺序：**
+1. 首先查看 `links.md` 中的Wiki链接
+2. 查看 `.knowledge/1.21.11/types/components.json` 获取组件定义
+3. 查看 `.knowledge/1.21.11/packets/` 了解数据包结构
+4. 参考 `prismarine-chat/` 和 `prismarine-nbt/` 的JavaScript实现
+
+**版本更新时：**
+1. 检查 `.knowledge/1.21.11/manifest.json` 中的生成时间和版本
+2. 对比新版本组件ID映射变化
+3. 更新本地代码中的常量定义
+
+#### 协议查看器
+
+**可视化工具**: https://tools.minecraft.wiki/static/tools/protocol/
+
+**数据源**: https://github.com/Nickid2018/MC_Protocol_Data
+
+使用方法：
+1. 选择版本（1.21.11 / Protocol 774）
+2. 选择数据包类型（Play/Login/Config）
+3. 查看字段结构和数据类型
+
+---
+
+### D.8 完整外部链接索引
+
+| 名称 | URL | 用途 | 语言 |
+|------|-----|------|------|
+| Minecraft Wiki | https://zh.minecraft.wiki/ | 协议文档主站 | 中文 |
+| Wiki AllPages | https://zh.minecraft.wiki/w/Special:AllPages | 所有页面索引 | 中文 |
+| 协议简介 | https://zh.minecraft.wiki/w/Java%E7%89%88%E7%BD%91%E7%BB%9C%E5%8D%8F%E8%AE%AE | 协议基础 | 中文 |
+| 数据组件 | https://zh.minecraft.wiki/w/%E6%95%B0%E6%8D%AE%E7%BB%84%E4%BB%B6 | 组件定义 | 中文 |
+| Slot Data | https://minecraft.wiki/w/Java_Edition_protocol/Slot_data | 物品槽格式 | 英文 |
+| 文本组件 | https://zh.minecraft.wiki/w/%E6%96%87%E6%9C%AC%E7%BB%84%E4%BB%B6 | 聊天消息格式 | 中文 |
+| NBT格式 | https://zh.minecraft.wiki/w/NBT%E6%A0%BC%E5%BC%8F | NBT二进制 | 中文 |
+| SNBT格式 | https://zh.minecraft.wiki/w/SNBT%E6%A0%BC%E5%BC%8F | SNBT文本 | 中文 |
+| 协议查看器 | https://tools.minecraft.wiki/static/tools/protocol/ | 可视化协议 | 可视化 |
+| go-mc | https://github.com/Tnze/go-mc | Go参考实现 | Go |
+| minecraft-data | https://github.com/PrismarineJS/minecraft-data | 游戏数据 | JSON |
+| prismarine-chat | https://github.com/PrismarineJS/prismarine-chat | 聊天解析 | Node.js |
+| prismarine-nbt | https://github.com/PrismarineJS/prismarine-nbt | NBT解析 | Node.js |
+| MC_Protocol_Data | https://github.com/Nickid2018/MC_Protocol_Data | 协议数据 | JSON |
+
+---
+
+## 附录E: 实施完成后文档更新清单
+
+### E.1 README.md 更新
+
+**位置**: `README.md` (项目根目录)
+
+**需更新内容**:
+1. **功能特性**: 添加"物品组件解析"功能描述
+2. **架构变更**: 更新项目结构说明，包含新的 `internal/item/` 和 `pkg/binutil/` 包
+3. **依赖说明**: 如果新增外部依赖，更新依赖列表
+4. **使用示例**: 如有API变更，更新示例代码
+
+**参考**: 更新后的 `README.md` 应该反映新的包结构
+
+### E.2 docs/README.md 更新
+
+**位置**: `docs/README.md`
+
+**需更新内容**:
+1. **文档索引**: 添加新文档链接
+2. **开发指南**: 如有开发流程变更，更新相应章节
+3. **架构图**: 如有架构变更，更新架构图
+
+### E.3 项目文档更新
+
+**需要检查更新的文档**:
+
+| 文档 | 检查项 | 更新要求 |
+|------|--------|----------|
+| `docs/protocol.md` | 协议实现说明 | 更新组件解析相关章节 |
+| `docs/development.md` | 开发规范 | 新增包开发规范 |
+| `docs/tui.md` | TUI功能 | 如有聊天解耦，更新说明 |
+| `docs/player.md` | 玩家系统 | 如有背包系统变更 |
+
+### E.4 API文档生成
+
+**建议**:
+- 如果项目使用 Go doc，确保新包的注释完整
+- 运行 `go doc -all ./...` 检查文档完整性
+- 如有公共API变更，更新API文档
+
+### E.5 CHANGELOG.md (如存在)
+
+**需记录**:
+1. **新功能**: 组件解析系统
+2. **架构变更**: 包结构重构
+3. **破坏性变更**: 如有API不兼容变更
+4. **依赖变更**: 新增或移除的依赖
+
+### E.6 版本标签
+
+**建议**:
+- 实施完成后打标签: `git tag -a v0.x.x -m "Add component parsing system"`
+- 更新版本号（如适用）
+
+### E.7 文档更新责任人
+
+**主要责任人**: 实施者
+**审查责任人**: 项目维护者
+**完成标准**: 所有引用文档链接有效，示例代码可运行
+
+---
+
+## 附录F: 验证清单
+
+### F.1 功能验证
+
+- [ ] 组件解析框架正常工作
+- [ ] 所有组件类型（0-103）都能被正确丢弃
+- [ ] 容器组件回调能正常触发
+- [ ] SlotData 包含组件信息
+
+### F.2 测试验证
+
+- [ ] 单元测试通过
+- [ ] 集成测试通过
+- [ ] 无回归问题
+
+### F.3 文档验证
+
+- [ ] README.md 已更新
+- [ ] docs/README.md 已更新
+- [ ] 设计文档已更新实施状态
+- [ ] 所有外部链接有效
+
+### F.4 代码质量
+
+- [ ] 代码审查通过
+- [ ] 符合Go代码规范
+- [ ] 无警告/错误
+- [ ] 测试覆盖率达标

@@ -184,14 +184,23 @@ func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
 	return &SlotData{ID: itemID, Count: count}, nil
 }
 
-// SkipSlotComponents 跳过物品组件
-// 结构: components_to_add(VarInt) -> [component_type(VarInt) + data] -> components_to_remove(VarInt) -> [component_type(VarInt)]
+// SkipSlotComponents 跳过物品组件 (1.21.11)
+// 结构: addComponentPatchesCount(VarInt) -> removeComponentPatchesCount(VarInt) ->
+//       addComponentPatches(Array) -> removeComponentPatches(Array)
 func SkipSlotComponents(r *bytes.Reader) error {
-	// 添加的组件
+	// 添加的组件数量
 	numAdd, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
+
+	// 移除的组件数量
+	numRemove, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+
+	// 添加的组件数组 (component_type(VarInt) + data)
 	for i := int32(0); i < numAdd; i++ {
 		// 先读 component_type
 		componentType, err := ReadVarIntFromReader(r)
@@ -204,11 +213,7 @@ func SkipSlotComponents(r *bytes.Reader) error {
 		}
 	}
 
-	// 移除的组件 (只有 component_type)
-	numRemove, err := ReadVarIntFromReader(r)
-	if err != nil {
-		return err
-	}
+	// 移除的组件数组 (只有 component_type)
 	for i := int32(0); i < numRemove; i++ {
 		if _, err := ReadVarIntFromReader(r); err != nil {
 			return err
