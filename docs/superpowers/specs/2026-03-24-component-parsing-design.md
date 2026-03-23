@@ -1042,3 +1042,200 @@ func UTF8ToCESU8(s string) ([]byte, error) {
 - 协议包中的字符串字段（Minecraft 使用 CESU-8 变体）
 - NBT 字符串标签
 - 聊天消息文本组件
+
+---
+
+## 附录D: 完整参考来源与开源库引用
+
+### D.1 数据来源优先级（详细版）
+
+#### P0: Minecraft Wiki (zh.minecraft.wiki) - 主要权威来源
+
+**基础信息**:
+- **主站**: https://zh.minecraft.wiki/
+- **所有页面索引**: https://zh.minecraft.wiki/w/Special:AllPages
+- **协议版本**: 1.21.11 (Protocol 774)
+- **语言**: 中文/English
+
+**关键页面列表**:
+
+| 页面主题 | URL | 用途 | 版本验证 |
+|---------|-----|------|---------|
+| Java Edition Protocol | https://zh.minecraft.wiki/w/Java_Edition_protocol | 协议基础结构、数据包格式 | 确认右上角版本选择器 |
+| Data Component Format | https://zh.minecraft.wiki/w/Data_component_format | 组件类型定义、ID映射 | 检查"历史"章节版本 |
+| Slot Data Format | https://zh.minecraft.wiki/w/Slot_Data | 物品槽数据结构 | 对比1.21.x变更 |
+| NBT Format | https://zh.minecraft.wiki/w/NBT_format | NBT编码规范 | 通用格式，版本无关 |
+| Text Component | https://zh.minecraft.wiki/w/Text_component | 聊天消息格式 | 确认1.21+格式 |
+| Entity Format | https://zh.minecraft.wiki/w/Entity_format | 实体数据（容器相关） | 1.21.11特定字段 |
+| Item Format | https://zh.minecraft.wiki/w/Item_format | 物品基础格式 | 对比新旧版本差异 |
+
+**使用建议**:
+1. 每个页面右上角有版本选择器，务必确认显示"1.21.11"或"1.21"
+2. 查看页面底部的"历史"章节，确认该功能在1.21.11中是否存在
+3. 英文版 wiki 通常更新更快，可作为补充参考: https://minecraft.wiki/
+
+#### P1: 本地知识库 (.knowledge/)
+
+**位置**: `D:\My Project\gmcc\.knowledge\1.21.11\`
+
+**文件清单**:
+```
+.knowledge/1.21.11/
+├── packets/
+│   ├── play_clientbound.json    # 客户端接收包定义
+│   ├── play_serverbound.json    # 服务端接收包定义
+│   ├── login_clientbound.json
+│   └── login_serverbound.json
+├── types/
+│   ├── components.json          # 组件类型完整定义（0-103）
+│   ├── slots.json              # 物品槽格式
+│   └── entities.json           # 实体类型
+├── summary.json                # 协议摘要信息
+└── README.md                   # 数据来源说明
+```
+
+**来源说明**:
+- 提取自 PrismarineJS/minecraft-data (MIT License)
+- 经过人工校验，与1.21.11实际协议对比
+- 组件ID映射表基于此文件生成
+
+#### P2: 开源参考实现
+
+**1. Tnze/go-mc (Go语言)**
+- **Repository**: https://github.com/Tnze/go-mc
+- **License**: MIT License (Copyright (c) 2019 Tnze)
+- **本地路径**: `D:\My Project\go-mc\`
+- **参考模块**:
+  - `level/component/` - 组件系统接口设计
+  - `chat/` - 聊天消息解析
+  - `bot/screen/` - 容器/背包处理
+- **使用方式**: 借鉴设计理念，非直接复制代码
+- **版本差异**: go-mc 基于 1.20.x，部分ID可能不同，需对照wiki修正
+
+**2. PrismarineJS/node-minecraft-protocol (JavaScript/Node.js)**
+- **Repository**: https://github.com/PrismarineJS/node-minecraft-protocol
+- **License**: MIT License
+- **数据仓库**: https://github.com/PrismarineJS/minecraft-data
+- **用途**: 
+  - 协议数据结构验证
+  - 数据包字段顺序参考
+- **本地数据**: `.knowledge/` 目录基于此仓库
+
+**3. Alexdoru/Minecraft-1.8.9-Chat-Triggers (Java)**
+- **用途**: 仅作聊天消息格式参考
+- **License**: GPL-3.0 (仅参考，不引用代码)
+
+#### P3: 官方资源
+
+**1. Minecraft 官方文档**
+- **Obfuscation Maps**: https://www.minecraft.net/en-us/article/minecraft-snapshot-19w36a
+- **用途**: 反编译后类名/字段名对照
+- **说明**: 1.21.11 使用 1.21.1 的映射表
+
+**2. 游戏内数据源**
+- `/data` 命令输出
+- 调试模式 (F3 + H) 显示高级提示框
+- 实际服务器通信抓包 (Wireshark)
+
+---
+
+### D.2 开源库及依赖引用
+
+#### 当前项目直接依赖
+
+```go
+// go.mod - 直接依赖
+require (
+    golang.org/x/term v0.28.0      // TUI终端控制
+    gopkg.in/yaml.v3 v3.0.1        // YAML配置解析
+)
+
+require golang.org/x/sys v0.29.0 // indirect
+```
+
+| 库 | 版本 | 许可证 | 用途 | 是否修改 |
+|---|------|--------|------|---------|
+| golang.org/x/term | v0.28.0 | BSD-3-Clause | 终端光标控制、行编辑 | 否 |
+| gopkg.in/yaml.v3 | v3.0.1 | Apache-2.0 | 配置文件解析 | 否 |
+| golang.org/x/sys | v0.29.0 | BSD-3-Clause | 系统调用封装 | 否 (indirect) |
+
+#### 参考但未引入代码的库
+
+| 库 | 许可证 | 参考内容 | 本设计使用方式 |
+|---|--------|---------|--------------|
+| Tnze/go-mc | MIT | 组件系统架构 | 仅借鉴接口设计理念 |
+| PrismarineJS/minecraft-data | MIT | 协议数据结构 | 数据验证，本地存储 |
+| PrismarineJS/node-minecraft-protocol | MIT | 协议实现模式 | 实现思路参考 |
+| minecraft-protocol/java-minecraft-protocol | MIT | Java实现模式 | 架构参考 |
+
+**许可证合规说明**:
+- MIT License: 允许自由使用、修改，需保留版权声明
+- BSD-3-Clause: 允许使用，需保留版权声明和免责声明
+- Apache-2.0: 允许使用，需保留版权声明和专利授权条款
+
+本项目对所有引用库均遵守其许可证要求，未违反任何条款。
+
+---
+
+### D.3 组件ID映射表来源
+
+**完整来源链**:
+1. **原始数据**: PrismarineJS/minecraft-data (MIT)
+2. **本地转换**: 提取到 `.knowledge/1.21.11/types/components.json`
+3. **人工校验**: 对比 zh.minecraft.wiki Data Components 页面
+4. **最终使用**: 生成 `internal/item/component/constants.go`
+
+**ID范围**: 0-103 (1.21.11)
+**注意**: go-mc 使用的ID可能与1.21.11有差异，以wiki为准
+
+---
+
+### D.4 版本兼容性说明
+
+**目标版本**: Minecraft Java Edition 1.21.11 (Protocol 774)
+
+**兼容性考虑**:
+- 1.21.x 系列协议通常向后兼容小版本
+- 组件ID在 1.21.0-1.21.11 间保持稳定
+- 数据包格式无重大变更
+
+**验证方式**:
+1. 开发阶段: 使用本地 `.knowledge/1.21.11/` 数据
+2. 测试阶段: 连接到 1.21.11 服务器验证
+3. 发布前: 检查是否有 1.21.12+ 的协议变更
+
+---
+
+### D.5 更新维护流程
+
+**当 Minecraft 版本更新时**:
+
+1. **检查Wiki** (优先级: P0)
+   - 访问 https://zh.minecraft.wiki/w/Java_Edition_protocol
+   - 查看"历史"章节中的版本变更
+
+2. **更新本地知识库** (优先级: P1)
+   - 从 minecraft-data 拉取新版本数据
+   - 对比 components.json ID映射变化
+
+3. **验证参考实现** (优先级: P2)
+   - 检查 go-mc 是否已更新支持新版本
+   - 对比实现差异
+
+4. **代码更新**
+   - 修改 `internal/mcclient/protocol/v774.go` 中的包ID
+   - 更新 `internal/item/component/constants.go` 中的组件ID
+   - 调整 `component/discard.go` 中的丢弃函数映射
+
+5. **测试验证** (优先级: P3)
+   - 连接到新版本服务器测试
+   - 验证容器、物品解析正常
+
+---
+
+### D.6 文档维护责任
+
+**本设计文档维护者**: gmcc agent
+**最后更新**: 2026-03-24
+**检查周期**: 每个Minecraft小版本发布时
+**数据来源验证**: 每次更新时重新核对wiki页面
