@@ -66,10 +66,12 @@ internal/mcclient/packet/
 ```go
 // component_handlers.go
 
-// ComponentResult 组件解析结果（当前可为空，后续扩展）
+// ComponentResult 组件解析结果
 type ComponentResult struct {
     TypeID int32
-    // Data 字段预留，后续根据组件类型添加具体数据
+    // Data 字段：已解析的组件数据（当前阶段通常为 nil）
+    // 后续扩展时根据组件类型存储具体数据
+    Data any
 }
 
 // ComponentHandler 组件处理函数签名
@@ -87,43 +89,71 @@ var containerCallback func(size int32) error
 ```go
 // component_handlers.go
 
-// DiscardComponent 默认处理器：读取并丢弃组件数据
-func DiscardComponent(r *bytes.Reader) (*ComponentResult, error) {
-    // 根据组件类型ID获取对应的跳过函数
-    // 复用原有的 SkipNBT, SkipVarInt 等辅助函数
-    skipper := getComponentSkipper(typeID)
-    if err := skipper(r); err != nil {
-        return nil, err
+// makeDiscardHandler 创建指定类型的丢弃处理器
+// 使用闭包捕获 typeID，避免参数传递问题
+func makeDiscardHandler(typeID int32) ComponentHandler {
+    return func(r *bytes.Reader) (*ComponentResult, error) {
+        // 根据组件类型获取对应的丢弃函数
+        skipper, exists := componentDiscards[typeID]
+        if !exists {
+            // 未知组件：尝试作为 NBT 丢弃
+            if err := SkipNBT(r); err != nil {
+                return nil, err
+            }
+            return &ComponentResult{TypeID: typeID}, nil
+        }
+        
+        if err := skipper(r); err != nil {
+            return nil, err
+        }
+        return &ComponentResult{TypeID: typeID}, nil
     }
-    return &ComponentResult{TypeID: typeID}, nil
 }
 
-// 容器组件特殊处理（预留）
-func ContainerComponentHandler(r *bytes.Reader) (*ComponentResult, error) {
-    // 读取容器大小
+// componentDiscards 组件类型到丢弃函数的映射
+// 从现有 component_skipping.go 提取，包含 0-103 所有已知组件
+var componentDiscards = map[int32]func(*bytes.Reader) error{
+    0:  SkipNBT,           // custom_data
+    1:  SkipVarInt,        // max_stack_size
+    2:  SkipVarInt,        // max_damage
+    // ... 完整映射表，见实现时提取
+    73: SkipContainerData, // container
+}
+
+// SkipContainerData 容器组件丢弃函数
+func SkipContainerData(r *bytes.Reader) error {
+    // 读取容器大小（预留回调参数）
     size, err := ReadVarIntFromReader(r)
     if err != nil {
-        return nil, err
+        return err
     }
     
     // 触发预留回调
     if containerCallback != nil {
         if err := containerCallback(size); err != nil {
-            return nil, err
+            return err
         }
     }
     
     // 读取并丢弃槽位数据
     length, err := ReadVarIntFromReader(r)
     if err != nil {
-        return nil, err
+        return err
     }
     for i := int32(0); i < length; i++ {
         if err := SkipSlotData(r); err != nil {
-            return nil, err
+            return err
         }
     }
     
+    return nil
+}
+
+// 容器组件处理器（包装丢弃函数，添加结果返回）
+func ContainerComponentHandler(r *bytes.Reader) (*ComponentResult, error) {
+    if err := SkipContainerData(r); err != nil {
+        return nil, err
+    }
     return &ComponentResult{TypeID: 73}, nil
 }
 
@@ -180,39 +210,48 @@ func ParseComponents(r *bytes.Reader) ([]*ComponentResult, error) {
 ### 3.5 初始化与注册
 
 ```go
-// component_handlers.go init()
+// component_handlers.go
+
+var componentHandlers map[int32]ComponentHandler
 
 func init() {
     componentHandlers = make(map[int32]ComponentHandler)
     
-    // 为所有已知组件类型注册默认丢弃处理器
-    // 数据来源于现有 component_skipping.go 的组件列表
-    for typeID := 0; typeID <= 119; typeID++ {
-        componentHandlers[int32(typeID)] = makeDiscardHandler(typeID)
+    // 从现有 component_skipping.go 的组件列表提取
+    // 实际 ID 范围为 0-103（见原 component_skipping.go）
+    componentIDs := []int32{
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+        60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+        80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
+        100, 101, 102, 103,
     }
     
-    // 容器组件使用特殊处理器
-    componentHandlers[73] = ContainerComponentHandler
-}
-
-// makeDiscardHandler 为指定组件类型创建丢弃处理器
-func makeDiscardHandler(typeID int32) ComponentHandler {
-    return func(r *bytes.Reader) (*ComponentResult, error) {
-        // 根据组件类型选择对应的跳过函数
-        skipper := getSkipperForType(typeID)
-        if err := skipper(r); err != nil {
-            return nil, err
+    // 为所有已知组件类型注册默认丢弃处理器
+    for _, typeID := range componentIDs {
+        // 容器组件(73)使用特殊处理器
+        if typeID == 73 {
+            componentHandlers[typeID] = ContainerComponentHandler
+        } else {
+            componentHandlers[typeID] = makeDiscardHandler(typeID)
         }
-        return &ComponentResult{TypeID: typeID}, nil
     }
 }
 ```
 
 ### 3.6 容器组件回调注册
 
-在 `handlers_container.go` 中注册容器回调：
+在 `internal/mcclient/handlers_container.go` 中注册容器回调：
 
 ```go
+package mcclient
+
+import (
+    "gmcc/internal/logx"
+    "gmcc/internal/mcclient/packet"
+)
+
 func init() {
     packet.SetContainerCallback(func(size int32) error {
         // 预留：后续实现容器内容处理
@@ -231,17 +270,27 @@ func init() {
 ```go
 // readers.go 中的 ReadSlotData 函数
 
+// SlotData 扩展组件字段
+type SlotData struct {
+    ID         int32
+    Count      int32
+    // 新增：组件数据（当前阶段仅存储解析结果，数据字段为 nil）
+    Components []*ComponentResult
+}
+
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
     // 原有逻辑读取 ItemID 等基础字段...
+    slot := &SlotData{ID: itemID, Count: count}
     
     // 修改：使用新的组件解析
     components, err := ParseComponents(r)
     if err != nil {
         return nil, err
     }
+    slot.Components = components
     
-    // 当前：忽略解析结果（保留在 ComponentResult 中）
-    // 后续：从 components 提取具体数据填充到 SlotData
+    // 当前：组件数据已存储在 SlotData.Components 中
+    // 后续：可以遍历 components 提取具体数据（如 custom_name, damage 等）
     
     return slot, nil
 }
