@@ -786,3 +786,216 @@ gmcc/
 | P2 | mcutil/uuid | 多个地方使用 |
 | P3 | nbt/ | 依赖较多，需要分阶段迁移 |
 | P3 | chat解耦 | 影响 TUI，可后续优化 |
+
+---
+
+## 附录C: 常量提取与优化建议
+
+### C.1 容器类型常量提取
+
+**当前位置**: `internal/mcclient/handlers_container.go:22-32`
+
+```go
+const (
+    ContainerTypePlayer    int32 = 0
+    ContainerTypeChest     int32 = 1
+    ContainerTypeCrafting  int32 = 2
+    ContainerTypeFurnace   int32 = 3
+    ContainerTypeDispenser int32 = 4
+    ContainerTypeHopper    int32 = 5
+    ContainerTypeAnvil     int32 = 6
+    ContainerTypeBeacon    int32 = 7
+    ContainerTypeBrewing   int32 = 8
+)
+```
+
+**建议移动位置**: `internal/mcclient/protocol/container_types.go`
+
+**理由**:
+- 容器类型是协议级别的常量，与具体处理器实现无关
+- 多处可能使用（packet handlers, player inventory, UI 显示）
+- 应该与 v774.go 中的协议常量保持一致的命名风格
+
+### C.2 组件类型 ID 常量提取
+
+**当前问题**: 组件 ID (0-103) 分布在 `component_skipping.go` 的映射表中，但没有明确定义为常量
+
+**建议**: 在 `internal/item/component/constants.go` 中定义：
+
+```go
+package component
+
+// Component IDs per Minecraft 1.21.11 Data Components
+const (
+    CustomData      int32 = 0
+    MaxStackSize    int32 = 1
+    MaxDamage       int32 = 2
+    Damage          int32 = 3
+    Unbreakable     int32 = 4
+    UseEffects      int32 = 5
+    CustomName      int32 = 6
+    MinimumAttackCharge int32 = 7
+    DamageType      int32 = 8
+    // ... 完整的 0-103 列表
+    Container       int32 = 73
+    BlockState      int32 = 74
+    Bees            int32 = 75
+    Lock            int32 = 76
+    ContainerLoot   int32 = 77
+    BreakSound      int32 = 78
+    // ... 继续到 103
+)
+```
+
+**使用方式**:
+```go
+// 取代魔法数字
+componentHandlers[Container] = ContainerComponentHandler
+
+// 在 switch 中使用
+case CustomName:
+    // 处理自定义名称
+```
+
+### C.3 常量命名规范
+
+统一常量命名风格：
+
+| 位置 | 当前命名 | 建议命名 |
+|------|---------|---------|
+| handlers_container.go | `ContainerTypePlayer` | `ContainerPlayer` 或保持 |
+| v774.go | `PlayClientContainerContent` | 保持（协议包 ID） |
+| constants.go | `MaxPacketSize` | 保持 |
+| component 新增 | - | `ComponentCustomName` |
+
+**推荐风格**:
+- 协议常量: `PlayClientXxx`, `PlayServerXxx`
+- 组件常量: `ComponentXxx` (带前缀避免冲突)
+- 容器常量: `ContainerXxx`
+- 通用常量: `MaxXxx`, `DefaultXxx`
+
+### C.4 NBT 解析优化建议
+
+**当前实现分析**:
+- 基于反射的解码器 (`internal/nbt/decode.go`)
+- 每次解码创建新的 Decoder
+- 反射带来性能开销
+
+**数据来源**: 参考 Minecraft NBT 格式规范 (wiki.vg)
+
+**优化方向**:
+
+#### 1. 添加 RawReader 类型
+
+用于直接读取原始 NBT 数据而不使用反射：
+
+```go
+// internal/nbt/raw.go
+
+type RawReader struct {
+    r   io.Reader
+    buf [8]byte // 复用缓冲区
+}
+
+func NewRawReader(r io.Reader) *RawReader {
+    return &RawReader{r: r}
+}
+
+// 直接读取，不通过反射
+func (r *RawReader) ReadByte() (int8, error)
+func (r *RawReader) ReadShort() (int16, error)
+func (r *RawReader) ReadInt() (int32, error)
+func (r *RawReader) ReadString() (string, error)
+func (r *RawReader) ReadCompound() (map[string]any, error)
+// ...
+```
+
+#### 2. Decoder 对象池
+
+```go
+var decoderPool = sync.Pool{
+    New: func() any {
+        return &Decoder{}
+    },
+}
+
+func AcquireDecoder(r io.Reader) *Decoder {
+    d := decoderPool.Get().(*Decoder)
+    d.r = r
+    d.offset = 0
+    d.fieldPath = d.fieldPath[:0]
+    return d
+}
+
+func ReleaseDecoder(d *Decoder) {
+    decoderPool.Put(d)
+}
+```
+
+#### 3. 特定类型的快速路径
+
+```go
+// 对于 map[string]any 使用快速路径
+func (d *Decoder) decodeCompoundFast() (map[string]any, error) {
+    result := make(map[string]any)
+    // 直接读取，避免反射开销
+    // ...
+    return result, nil
+}
+```
+
+#### 4. 组件解析中的 NBT 优化
+
+在组件解析时，大多数组件只需要特定字段：
+
+```go
+// 优化的 custom_name 组件解析
+func ParseCustomNameComponent(r *bytes.Reader) (*ComponentResult, error) {
+    // 使用 RawReader 直接读取 NBT
+    raw := nbt.NewRawReader(r)
+    
+    // 只读取我们关心的字段，忽略其他
+    compound, err := raw.ReadCompound()
+    if err != nil {
+        return nil, err
+    }
+    
+    name, ok := compound["text"].(string)
+    if !ok {
+        return nil, fmt.Errorf("custom_name missing text field")
+    }
+    
+    return &ComponentResult{
+        TypeID: CustomName,
+        Data:   name,
+    }, nil
+}
+```
+
+#### 5. CESU8 字符串编码优化
+
+**当前位置**: `internal/nbt/decode.go:739-782` (readUTF8String)
+
+**优化建议**: 提取为公开函数并优化
+
+```go
+// pkg/nbt/cesu8.go
+
+// CESU8ToUTF8 converts CESU-8 (Minecraft's string encoding) to UTF-8
+func CESU8ToUTF8(data []byte) (string, error) {
+    // 优化版本：预分配容量，减少扩容
+    var result []rune
+    // ... 实现
+}
+
+// UTF8ToCESU8 converts UTF-8 to CESU-8
+func UTF8ToCESU8(s string) ([]byte, error) {
+    // 用于协议写入
+    // ... 实现
+}
+```
+
+**使用场景**:
+- 协议包中的字符串字段（Minecraft 使用 CESU-8 变体）
+- NBT 字符串标签
+- 聊天消息文本组件
