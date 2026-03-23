@@ -5,6 +5,8 @@
 **状态**: 设计中  
 **协议版本**: 774 (1.21.11)
 
+**参考实现声明**: 本设计参考了 Tnze/go-mc 项目的组件系统设计，遵循 MIT License (Copyright (c) 2019 Tnze)。本设计仅借鉴其接口设计理念，具体实现方式采用处理器函数映射表模式。
+
 ---
 
 ## 1. 概述
@@ -591,9 +593,11 @@ func init() {
 **Data Components 定义：**
 - **主要来源**: Minecraft Wiki (zh.minecraft.wiki - Data Components 页面)
 - **参考实现**: go-mc (Tnze/go-mc) 的 `level/component/` 包
+  - **License**: MIT License (Copyright (c) 2019 Tnze)
   - 提供组件接口设计、ID 映射、序列化方法
   - 组件数量：~40 个已实现（1.20+ 版本）
   - **ID 映射注意**: go-mc 的 ID 顺序可能与 1.21.11 有差异，需对照 wiki
+  - **使用方式**: 本设计仅借鉴其接口设计理念，具体实现采用处理器函数映射表模式
 - **验证方式**: 对比 `.knowledge/1.21.11/types/components.json`
 
 **组件ID映射表：**
@@ -605,6 +609,10 @@ func init() {
 ### A.3 参考实现对比
 
 **go-mc 组件结构 (参考):**
+
+> 参考实现: [Tnze/go-mc](https://github.com/Tnze/go-mc)
+> License: MIT License (Copyright (c) 2019 Tnze)
+> 本设计仅借鉴接口设计理念，实现方式不同
 
 ```go
 // go-mc/level/component/components.go
