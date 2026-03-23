@@ -12,6 +12,7 @@ import (
 	"gmcc/internal/nbt"
 )
 
+// SlotData 兼容类型定义（避免循环依赖）
 type SlotData struct {
 	ID    int32
 	Count int32
@@ -157,9 +158,15 @@ func ReadBytes(r io.Reader, n int) ([]byte, error) {
 	return b, nil
 }
 
-// ReadSlotData 解析 1.21+ ItemStack 格式
-// 结构: count(VarInt) -> [如果count>0] item_id(VarInt) -> components
+// ReadSlotData 使用 internal/item 的实现
 func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
+	// TODO: 完成组件解析后更新为使用新的实现
+	// 现在使用临时实现
+	return readSlotDataInternal(r)
+}
+
+// 内部实现，避免循环依赖
+func readSlotDataInternal(r *bytes.Reader) (*SlotData, error) {
 	// 1. item_count (VarInt)
 	count, err := ReadVarIntFromReader(r)
 	if err != nil {
@@ -181,12 +188,14 @@ func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
 		return nil, err
 	}
 
+	// 4. 返回结果
 	return &SlotData{ID: itemID, Count: count}, nil
 }
 
 // SkipSlotComponents 跳过物品组件 (1.21.11)
 // 结构: addComponentPatchesCount(VarInt) -> removeComponentPatchesCount(VarInt) ->
-//       addComponentPatches(Array) -> removeComponentPatches(Array)
+//
+//	addComponentPatches(Array) -> removeComponentPatches(Array)
 func SkipSlotComponents(r *bytes.Reader) error {
 	// 添加的组件数量
 	numAdd, err := ReadVarIntFromReader(r)
