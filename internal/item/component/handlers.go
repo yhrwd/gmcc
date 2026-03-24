@@ -4,9 +4,9 @@ package component
 func defaultHandlers() map[int32]ComponentHandler {
 	handlers := make(map[int32]ComponentHandler)
 
-	// ID 范围 0-103
-	for typeID := int32(0); typeID <= 103; typeID++ {
-		if typeID == 73 {
+	// ID 范围 MinComponentID-MaxComponentID
+	for typeID := MinComponentID; typeID <= MaxComponentID; typeID++ {
+		if typeID == Container {
 			// 容器组件特殊处理
 			handlers[typeID] = ContainerComponentHandler
 		} else {

@@ -67,9 +67,12 @@ func readComponents(r *bytes.Reader) ([]*component.ComponentResult, error) {
 		return nil, fmt.Errorf("read remove component count: %w", err)
 	}
 
-	// 创建解析器
-	parser := component.NewParser()
+	// 优化的批量解析 - 预分配容量，避免动态扩容
 	components := make([]*component.ComponentResult, 0, numAdd)
+
+	// 从池获取解析器
+	parser := component.Acquire()
+	defer component.Release(parser)
 
 	// 解析添加的组件
 	for i := int32(0); i < numAdd; i++ {
