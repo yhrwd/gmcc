@@ -257,8 +257,14 @@ func SkipNBT(r *bytes.Reader) error {
 	}
 	dec := nbt.NewDecoder(r).NetworkFormat(true)
 	err := dec.Skip()
-	if err != nil && err.Error() == "unexpected EOF" {
-		return nil
+	if err != nil {
+		// 对于 EOF 或未知的 tag type，记录但不返回错误
+		// 这样可以避免因为一个组件解析失败而导致整个 packet 解析失败
+		if err.Error() == "unexpected EOF" ||
+			(len(err.Error()) > 18 && err.Error()[:18] == "unknown tag type: ") {
+			logx.Warnf("SkipNBT 警告: %v, 剩余 %d 字节", err, r.Len())
+			return nil
+		}
 	}
 	return err
 }

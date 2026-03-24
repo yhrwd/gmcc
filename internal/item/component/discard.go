@@ -118,7 +118,7 @@ func makeDiscardHandler(typeID int32) ComponentHandler {
 			FrameType,            // 100
 			BannerPattern,        // 101
 			BaseColorComponent,   // 102
-			ColorComponent:       // 103
+			ColorComponent,       // 103
 			// NBT 组件
 			err = packet.SkipNBT(r)
 

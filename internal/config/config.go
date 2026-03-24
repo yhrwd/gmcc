@@ -24,11 +24,16 @@ type LogConfig struct {
 	EnableFile bool   `yaml:"enable_file"`
 }
 
+type RuntimeConfig struct {
+	Headless bool `yaml:"headless"` // 无界面模式，只记录日志
+}
+
 type Config struct {
 	Account AccountConfig `yaml:"account"`
 	Server  ServerConfig  `yaml:"server"`
 	Actions ActionsConfig `yaml:"actions"`
 	Log     LogConfig     `yaml:"log"`
+	Runtime RuntimeConfig `yaml:"runtime"`
 }
 
 // Default 返回默认配置模板。
@@ -49,9 +54,17 @@ func Default() Config {
 		},
 		Log: LogConfig{
 			LogDir:     "logs",
-			MaxSize:    10,
+			MaxSize:    512, // 单位：KB，转换为字节时 *1024
 			Debug:      false,
 			EnableFile: true,
 		},
+		Runtime: RuntimeConfig{
+			Headless: false,
+		},
 	}
+}
+
+// MaxSizeInBytes 返回转换为字节的最大日志大小 (KB -> 字节)
+func (c *LogConfig) MaxSizeInBytes() int64 {
+	return c.MaxSize * 1024
 }
