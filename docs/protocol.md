@@ -431,3 +431,66 @@ var features774 = protocolFeatures{
 3. 包名映射 `packetName()`
 4. 数据类型编解码（如有变化）
 5. 新的数据包处理器
+
+## 物品组件系统 (1.21.11+)
+
+从 Minecraft 1.20.5 开始，物品数据使用组件系统 (Data Components) 存储。协议 774 支持 104 种不同的数据组件。
+
+### 物品槽数据结构
+
+```
+[item_count: VarInt] [item_id: VarInt] [components]
+```
+
+当 `item_count` 为 0 时，表示空槽位。
+
+### 组件补丁结构
+
+```
+[addComponentCount: VarInt]
+[removeComponentCount: VarInt]
+[addedComponents: Component[]]
+[removedComponents: VarInt[]]
+```
+
+### 组件数据类型
+
+组件数据格式取决于组件类型：
+
+| 组件类型 | 数据格式 | 示例 |
+|---------|---------|------|
+| NBT 组件 | Named Binary Tag | custom_data, custom_name |
+| 数值组件 | VarInt/Int32/Float32 | max_stack_size, damage |
+| 空组件 | 无数据 | unbreakable, glider |
+| 数组组件 | PrefixedArray | lore, enchantments |
+| 复杂组件 | 自定义结构 | container, potion_contents |
+
+### 组件解析
+
+使用 `internal/item/component` 包解析组件：
+
+```go
+import "gmcc/internal/item/component"
+
+// 获取解析器 (从对象池)
+parser := component.Acquire()
+defer component.Release(parser)
+
+// 解析单个组件
+result, err := parser.ParseComponent(typeID, reader)
+
+// 获取组件名称
+name := component.ComponentName(typeID)
+```
+
+### 完整组件列表
+
+支持 104 种组件 ID (0-103)，包括：
+- **基础属性**: CustomData(0), MaxStackSize(1), MaxDamage(2), Damage(3)
+- **显示**: CustomName(6), ItemName(9), Lore(11), Rarity(12)
+- **附魔**: Enchantments(13), StoredEnchantments(41), EnchantmentGlintOverride(21)
+- **功能**: Food(23), Consumable(24), Tool(28), Weapon(29)
+- **容器**: Container(73), BundleContents(49), ChargedProjectiles(48)
+- **实体**: EntityData(56), BucketEntityData(57), BlockEntityData(58)
+
+完整列表参见 `internal/item/component/constants.go` 或文档 [data_components_1.21.11.md](data_components_1.21.11.md)。

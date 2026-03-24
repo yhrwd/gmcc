@@ -14,6 +14,7 @@ Go 语言实现的 Minecraft Java 版控制台客户端，支持协议版本 774
 - 命令发送
 - CESU-8 编码支持（正确显示中文和 Emoji）
 - NBT 数据解析与路径查询
+- **物品组件解析系统** - 支持 104 种数据组件类型
 - TUI 终端用户界面
 - 玩家状态和背包系统
 
@@ -67,6 +68,8 @@ cmd/gmcc/          # 程序入口
 internal/          # 核心模块
   auth/            # 认证 (microsoft, minecraft)
   config/          # 配置加载
+  item/            # 物品系统 (新增)
+    component/     # 组件解析框架
   logx/            # 日志系统
   mcclient/        # 客户端核心
   nbt/             # NBT 数据处理
@@ -74,6 +77,7 @@ internal/          # 核心模块
   session/         # 令牌缓存
   tui/             # 终端 UI
 pkg/               # 公共工具
+  binutil/         # 二进制工具 (新增)
 ```
 
 ## 文档
