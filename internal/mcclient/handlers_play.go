@@ -126,16 +126,28 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 		return c.handleSetHeldSlotPacket(pkt.Data)
 
 	case protocol.PlayClientContainerContent:
-		return c.handleContainerContentPacket(pkt.Data)
+		if c.cfg.Packets.HandleContainer {
+			return c.handleContainerContentPacket(pkt.Data)
+		}
+		return nil
 
 	case protocol.PlayClientContainerSlot:
-		return c.handleContainerSlotPacket(pkt.Data)
+		if c.cfg.Packets.HandleContainer {
+			return c.handleContainerSlotPacket(pkt.Data)
+		}
+		return nil
 
 	case protocol.PlayClientContainerClose:
-		return c.handleContainerClosePacket(pkt.Data)
+		if c.cfg.Packets.HandleContainer {
+			return c.handleContainerClosePacket(pkt.Data)
+		}
+		return nil
 
 	case protocol.PlayClientContainerSetData:
-		return c.handleContainerSetDataPacket(pkt.Data)
+		if c.cfg.Packets.HandleContainer {
+			return c.handleContainerSetDataPacket(pkt.Data)
+		}
+		return nil
 
 	case protocol.PlayClientOpenScreen:
 		return c.handleOpenScreenPacket(pkt.Data)
@@ -148,6 +160,12 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 
 	case protocol.PlayClientEntityData:
 		return c.handleEntityDataPacket(pkt.Data)
+
+	case protocol.PlayClientPlayerInfoUpdate:
+		return c.handlePlayerInfoUpdate(pkt.Data)
+
+	case protocol.PlayClientPlayerInfoRemove:
+		return c.handlePlayerInfoRemove(pkt.Data)
 
 	default:
 		logx.PacketLogf("未处理的 Play 数据包: id=0x%02X (%s) len=%d", pkt.ID, protocol.PacketName(protocol.StatePlay, pkt.ID), len(pkt.Data))

@@ -55,7 +55,13 @@ type Client struct {
 	commandSign   map[string]signableCommandTarget
 	chatSignMu    sync.Mutex
 
-	Player *player.Player
+	Player    *player.Player
+	players   map[string]playerInfo
+	playersMu sync.RWMutex
+}
+
+type playerInfo struct {
+	uuid [16]byte
 }
 
 func New(cfg *config.Config) *Client {
@@ -68,6 +74,7 @@ func New(cfg *config.Config) *Client {
 		uuid:        packet.OfflineUUID(name),
 		commandSign: map[string]signableCommandTarget{},
 		Player:      player.NewPlayer(),
+		players:     make(map[string]playerInfo),
 	}
 
 	return client

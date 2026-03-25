@@ -184,6 +184,8 @@ func (c *Client) syncPlayerInfo() {
 
 	inventory := c.Player.Inventory.GetAll()
 	c.logInventory(inventory)
+
+	c.logOnlinePlayers()
 }
 
 func (c *Client) logPlayerInfo(info map[string]any) {
