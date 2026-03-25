@@ -37,8 +37,8 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 
 func (c *Client) handleSetExperiencePacket(data []byte) error {
 	r := bytes.NewReader(data)
-	if r.Len() < 9 {
-		logx.PacketError("set_experience", data, fmt.Errorf("数据过短: %d bytes (需要至少9)", r.Len()))
+	if r.Len() < 6 {
+		logx.PacketError("set_experience", data, fmt.Errorf("数据过短: %d bytes (需要至少6)", r.Len()))
 		return nil
 	}
 

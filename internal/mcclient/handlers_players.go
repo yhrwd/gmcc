@@ -11,7 +11,8 @@ import (
 func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 	r := bytes.NewReader(data)
 
-	action, err := packet.ReadVarInt(r)
+	// 协议 774: action 是单字节位域，不是 varint
+	action, err := packet.ReadU8(r)
 	if err != nil {
 		return fmt.Errorf("读取 player_info_update action 失败: %w", err)
 	}
@@ -20,6 +21,8 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("读取 player_info_update count 失败: %w", err)
 	}
+
+	logx.Debugf("player_info_update: action=0x%02x, count=%d", action, count)
 
 	c.playersMu.Lock()
 	defer c.playersMu.Unlock()
@@ -31,7 +34,8 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 		}
 
 		var playerName string
-		if action&1 != 0 {
+		// 协议 774 位定义: bit7=add_player, bit6=init_chat, bit5=game_mode, bit4=listed, bit3=latency, bit2=display_name, bit1=list_order, bit0=show_hat
+		if action&0x80 != 0 {
 			playerName = packet.MustReadString(r, "player_info_update.name")
 			propertiesCount := packet.MustReadVarInt(r, "player_info_update.properties_count")
 
@@ -46,41 +50,61 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 
 			c.players[playerName] = playerInfo{uuid: uuid}
 
-			logx.Debugf("玩家信息更新: 添加玩家 %s (%s)", playerName, formatUUIDShort(uuid))
+			logx.Infof("玩家信息更新: 添加玩家 %s (%s)", playerName, formatUUIDShort(uuid))
 		} else {
 			playerName = c.findPlayerNameByUUID(uuid)
+			if playerName == "" {
+				logx.Warnf("玩家信息更新: 收到更新但未知玩家 UUID %s (action=0x%02x)", formatUUIDShort(uuid), action)
+			}
 		}
 
-		if action&2 != 0 {
-			_ = packet.MustReadVarInt(r, "player_info_update.chat_session")
+		if action&0x40 != 0 {
+			// initialize_chat: optional chat session
+			hasSession := packet.MustReadBool(r, "player_info_update.has_chat_session")
+			if hasSession {
+				_, _ = packet.ReadUUID(r) // session UUID
+				_, _ = packet.ReadVarInt(r)
+				keyLen := packet.MustReadVarInt(r, "player_info_update.key_len")
+				_, _ = packet.ReadBytes(r, int(keyLen)) // public key
+				sigLen := packet.MustReadVarInt(r, "player_info_update.sig_len")
+				_, _ = packet.ReadBytes(r, int(sigLen)) // signature
+			}
 		}
 
-		if action&4 != 0 {
+		if action&0x20 != 0 {
 			gamemode := packet.MustReadVarInt(r, "player_info_update.gamemode")
 			if playerName != "" {
 				logx.Debugf("玩家 %s 游戏模式更新: %d", playerName, gamemode)
 			}
 		}
 
-		if action&8 != 0 {
+		if action&0x10 != 0 {
 			listed := packet.MustReadBool(r, "player_info_update.listed")
 			if playerName != "" {
 				logx.Debugf("玩家 %s 列表状态: %v", playerName, listed)
 			}
 		}
 
-		if action&16 != 0 {
+		if action&0x08 != 0 {
 			latency := packet.MustReadVarInt(r, "player_info_update.latency")
 			if playerName != "" {
 				logx.Debugf("玩家 %s 延迟: %dms", playerName, latency)
 			}
 		}
 
-		if action&32 != 0 {
+		if action&0x04 != 0 {
 			hasDisplayName := packet.MustReadBool(r, "player_info_update.has_display_name")
 			if hasDisplayName {
 				_ = packet.MustReadString(r, "player_info_update.display_name")
 			}
+		}
+
+		if action&0x02 != 0 {
+			_ = packet.MustReadVarInt(r, "player_info_update.list_order")
+		}
+
+		if action&0x01 != 0 {
+			_ = packet.MustReadBool(r, "player_info_update.show_hat")
 		}
 	}
 
