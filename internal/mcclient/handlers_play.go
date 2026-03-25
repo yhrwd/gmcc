@@ -106,6 +106,7 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 			if err := c.initSecureChatSession(); err != nil {
 				logx.Warnf("初始化 secure chat 会话失败: %v", err)
 			}
+			c.initializeTrackers()
 			c.runOnJoinActions()
 		}
 		return nil
@@ -166,6 +167,19 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 
 	case protocol.PlayClientPlayerInfoRemove:
 		return c.handlePlayerInfoRemove(pkt.Data)
+
+	// 实体跟踪相关包
+	case protocol.PlayClientAddEntity:
+		return c.handleAddEntity(pkt.Data)
+
+	case protocol.PlayClientTeleportEntity:
+		return c.handleTeleportEntity(pkt.Data)
+
+	case protocol.PlayClientMoveEntityPos:
+		return c.handleMoveEntityPos(pkt.Data)
+
+	case protocol.PlayClientRemoveEntities:
+		return c.handleRemoveEntities(pkt.Data)
 
 	default:
 		logx.PacketLogf("未处理的 Play 数据包: id=0x%02X (%s) len=%d", pkt.ID, protocol.PacketName(protocol.StatePlay, pkt.ID), len(pkt.Data))

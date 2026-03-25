@@ -15,6 +15,7 @@ import (
 	mcauth "gmcc/internal/auth/minecraft"
 	"gmcc/internal/config"
 	"gmcc/internal/constants"
+	"gmcc/internal/entity"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/mcclient/protocol"
@@ -58,6 +59,10 @@ type Client struct {
 	Player    *player.Player
 	players   map[string]playerInfo
 	playersMu sync.RWMutex
+
+	// 实体跟踪
+	entityTracker *entity.Tracker
+	NearbyPlayers *player.NearbyTracker
 }
 
 type playerInfo struct {
@@ -323,6 +328,28 @@ func tokenExpiresAt(expiresIn int) time.Time {
 		return time.Time{}
 	}
 	return time.Now().Add(time.Duration(expiresIn) * time.Second).UTC()
+}
+
+// initializeTrackers 初始化实体和玩家跟踪器
+func (c *Client) initializeTrackers() {
+	// 创建实体跟踪器
+	c.entityTracker = entity.NewTracker()
+
+	// 创建玩家跟踪器
+	c.NearbyPlayers = player.NewNearbyTracker(c.entityTracker, c.getPlayerInfoByUUID)
+}
+
+// getPlayerInfoByUUID 通过UUID查找玩家用户名
+func (c *Client) getPlayerInfoByUUID(uuid [16]byte) (username string, found bool) {
+	c.playersMu.RLock()
+	defer c.playersMu.RUnlock()
+
+	for name, info := range c.players {
+		if info.uuid == uuid {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 func (c *Client) handlePacket(pkt packet.Packet) error {

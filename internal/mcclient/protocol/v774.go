@@ -52,17 +52,21 @@ const (
 
 // Play state packet IDs (protocol 774)
 const (
+	PlayClientAddEntity        int32 = 0x01 // add_entity
 	PlayClientDeclareCommands  int32 = 0x10
 	PlayClientCookieReq        int32 = 0x15
 	PlayClientDisconnect       int32 = 0x20
 	PlayClientProfilelessChat  int32 = 0x21
+	PlayClientMoveEntityPos    int32 = 0x09 // move_entity_pos
 	PlayClientKeepAlive        int32 = 0x2B
 	PlayClientLogin            int32 = 0x30
 	PlayClientPlayerChat       int32 = 0x3F
 	PlayClientPing             int32 = 0x3B
+	PlayClientTeleportEntity   int32 = 0x48 // teleport_entity
 	PlayClientPosition         int32 = 0x46
 	PlayClientPackPop          int32 = 0x4E
 	PlayClientPackPush         int32 = 0x4F
+	PlayClientRemoveEntities   int32 = 0x4B // remove_entities
 	PlayClientActionBar        int32 = 0x55
 	PlayClientSystemChat       int32 = 0x77
 	PlayClientSetHealth        int32 = 0x66
@@ -146,17 +150,21 @@ var CfgClientPacketNames = map[int32]string{
 }
 
 var PlayClientPacketNames = map[int32]string{
+	PlayClientAddEntity:        "add_entity",
 	PlayClientDeclareCommands:  "declare_commands",
 	PlayClientCookieReq:        "cookie_request",
 	PlayClientDisconnect:       "disconnect",
 	PlayClientProfilelessChat:  "profileless_chat",
+	PlayClientMoveEntityPos:    "move_entity_pos",
 	PlayClientKeepAlive:        "keep_alive",
 	PlayClientLogin:            "login",
 	PlayClientPlayerChat:       "player_chat",
 	PlayClientPing:             "ping",
+	PlayClientTeleportEntity:   "teleport_entity",
 	PlayClientPosition:         "player_position",
 	PlayClientPackPop:          "resource_pack_pop",
 	PlayClientPackPush:         "resource_pack_push",
+	PlayClientRemoveEntities:   "remove_entities",
 	PlayClientActionBar:        "action_bar",
 	PlayClientSystemChat:       "system_chat",
 	PlayClientSetHealth:        "update_health",
