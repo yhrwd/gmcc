@@ -28,12 +28,17 @@ type RuntimeConfig struct {
 	Headless bool `yaml:"headless"` // 无界面模式，只记录日志
 }
 
+type PacketConfig struct {
+	HandleContainer bool `yaml:"handle_container"` // 是否处理背包数据包
+}
+
 type Config struct {
 	Account AccountConfig `yaml:"account"`
 	Server  ServerConfig  `yaml:"server"`
 	Actions ActionsConfig `yaml:"actions"`
 	Log     LogConfig     `yaml:"log"`
 	Runtime RuntimeConfig `yaml:"runtime"`
+	Packets PacketConfig  `yaml:"packets"`
 }
 
 // Default 返回默认配置模板。
@@ -60,6 +65,9 @@ func Default() Config {
 		},
 		Runtime: RuntimeConfig{
 			Headless: false,
+		},
+		Packets: PacketConfig{
+			HandleContainer: true,
 		},
 	}
 }
