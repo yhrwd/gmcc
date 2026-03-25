@@ -128,11 +128,7 @@ func savePacketDump(packetName string, data []byte, err error) {
 	}
 	defer f.Close()
 
-	fmt.Fprintf(f, "# Packet: %s\n", packetName)
-	fmt.Fprintf(f, "# Error: %v\n", err)
-	fmt.Fprintf(f, "# Length: %d bytes\n", len(data))
-	fmt.Fprintf(f, "# Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-	fmt.Fprintln(f, "# --- HEX DUMP ---")
+	// 直接写入原始二进制数据，不添加任何头部信息
 	f.Write(data)
 }
 

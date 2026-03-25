@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"gmcc/internal/constants"
 	"gmcc/internal/logx"
@@ -190,13 +191,13 @@ func skipSlotComponents(r *bytes.Reader) error {
 	// 添加的组件数量
 	numAdd, err := ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		return fmt.Errorf("read num_add: %w", err)
 	}
 
 	// 移除的组件数量
 	numRemove, err := ReadVarIntFromReader(r)
 	if err != nil {
-		return err
+		return fmt.Errorf("read num_remove: %w", err)
 	}
 
 	// 跳过添加的组件
@@ -204,50 +205,205 @@ func skipSlotComponents(r *bytes.Reader) error {
 		// 读取 component_type
 		componentType, err := ReadVarIntFromReader(r)
 		if err != nil {
-			return err
+			// 如果读取组件类型失败，可能是数据损坏，尝试跳过剩余部分
+			logx.Debugf("Failed to read component type at index %d: %v, remaining bytes: %d", i, err, r.Len())
+			// 尝试通过 NBT 跳过剩余部分
+			if skipErr := SkipNBT(r); skipErr != nil {
+				// 如果 NBT 也失败，跳过所有剩余字节
+				logx.Debugf("SkipNBT also failed: %v, skipping all remaining bytes", skipErr)
+				if r.Len() > 0 {
+					_, _ = r.Seek(int64(r.Len()), 1)
+				}
+			}
+			return fmt.Errorf("read component type at index %d: %w", i, err)
 		}
 		// 根据类型跳过数据
 		if err := skipComponentByType(r, componentType); err != nil {
-			return fmt.Errorf("component type %d: %w", componentType, err)
+			logx.Debugf("Failed to skip component type %d at index %d: %v", componentType, i, err)
+			// 如果跳过失败，尝试跳到下一个组件
+			continue
 		}
 	}
 
 	// 跳过移除的组件 (只有 component_type)
 	for i := int32(0); i < numRemove; i++ {
 		if _, err := ReadVarIntFromReader(r); err != nil {
-			return err
+			return fmt.Errorf("read removed component type at index %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-// skipComponentByType 根据组件类型跳过数据 (简化版)
+// skipComponentByType 根据组件类型跳过数据 (参考 1.21.11 数据组件规范)
 func skipComponentByType(r *bytes.Reader, componentType int32) error {
-	// 使用新的组件系统来跳过数据
-	// 这里使用一个简化的方法：尝试读取为NBT，失败则跳过VarInt
-	// 这是为了兼容旧代码，新代码应直接使用 internal/item/component
-	switch componentType {
-	case 0, 6, 9, 11, 22, 35, 55, 56, 57, 58, 64, 76, 77, 93, 95, 96, 97, 98, 99:
-		// NBT 类型
-		return SkipNBT(r)
-	case 1, 2, 3, 7, 12, 19, 20, 31, 44, 46, 47, 61, 91, 100, 102, 103:
-		// VarInt 类型
+	// VarInt 类型 (基础数字、稀有度、附魔能力等)
+	varIntTypes := map[int32]bool{
+		1:   true, // max_stack_size
+		2:   true, // max_damage
+		3:   true, // damage
+		7:   true, // minimum_attack_charge
+		12:  true, // rarity
+		19:  true, // repair_cost
+		20:  true, // creative_slot_lock
+		31:  true, // enchantable
+		44:  true, // map_id
+		46:  true, // map_post_processing
+		47:  true, // potion_duration_scale
+		61:  true, // ominous_bottle_amplifier
+		91:  true, // bundle_remaining_space
+		102: true, // base_color_component
+		103: true, // color_component
+		54:  true, // trimming_material (VarInt for material ID)
+		73:  true, // container (size VarInt)
+	}
+
+	if varIntTypes[componentType] {
 		_, err := ReadVarIntFromReader(r)
 		return err
-	case 4, 34:
-		// 无数据
-		return nil
-	case 5, 17, 21, 42, 43, 71:
-		// Int32 / Bool
+	}
+
+	// Int32 类型 (颜色、定制模型数据等)
+	int32Types := map[int32]bool{
+		17:  true, // custom_model_data
+		42:  true, // dyed_color
+		43:  true, // map_color
+		71:  true, // base_color
+		100: true, // frame_type
+	}
+
+	if int32Types[componentType] {
 		_, err := ReadInt32FromReader(r)
 		return err
-	case 8, 10, 14, 15, 27, 28, 29, 32, 33, 37, 38, 39, 40, 41, 48, 49, 50, 51, 52, 53, 54, 59, 60, 62, 63, 65, 66, 67, 68, 69, 70, 72, 73, 74, 75, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 92, 94, 101:
-		// 复杂类型，尝试NBT
-		return SkipNBT(r)
-	default:
-		// 未知类型，尝试NBT
+	}
+
+	// Bool 类型 (无数据、附魔光效等)
+	boolTypes := map[int32]bool{
+		4:  true, // unbreakable
+		21: true, // enchantment_glint_override
+		34: true, // glider
+		36: true, // death_protection
+	}
+
+	if boolTypes[componentType] {
+		_, err := ReadBoolFromReader(r)
+		return err
+	}
+
+	// NBT 类型 (文本组件、复杂结构等)
+	nbtTypes := map[int32]bool{
+		0:   true, // custom_data
+		6:   true, // custom_name
+		9:   true, // item_name
+		11:  true, // lore
+		13:  true, // enchantments
+		22:  true, // intangible_projectile
+		23:  true, // food
+		24:  true, // consumable
+		25:  true, // use_remainder
+		26:  true, // use_cooldown
+		27:  true, // damage_resistant
+		28:  true, // tool
+		29:  true, // weapon
+		30:  true, // attack_range
+		32:  true, // equippable
+		33:  true, // repairable
+		35:  true, // tooltip_style
+		37:  true, // blocks_attacks
+		38:  true, // piercing_weapon
+		39:  true, // kinetic_weapon
+		40:  true, // swing_animation
+		41:  true, // stored_enchantments
+		45:  true, // map_decorations
+		50:  true, // potion_contents
+		51:  true, // suspicious_stew_effects
+		52:  true, // writable_book_content
+		53:  true, // written_book_content
+		55:  true, // debug_stick_state
+		56:  true, // entity_data
+		57:  true, // bucket_entity_data
+		58:  true, // block_entity_data
+		59:  true, // instrument
+		60:  true, // provides_trim_material
+		62:  true, // jukebox_playable
+		63:  true, // provides_banner_patterns
+		64:  true, // recipes
+		65:  true, // lodestone_tracker
+		66:  true, // firework_explosion
+		67:  true, // fireworks
+		68:  true, // profile
+		69:  true, // note_block_sound
+		70:  true, // banner_patterns
+		75:  true, // bees
+		76:  true, // lock
+		77:  true, // container_loot
+		78:  true, // break_sound
+		79:  true, // villager_variant
+		80:  true, // wolf_variant
+		81:  true, // cat_variant
+		82:  true, // axolotl_variant
+		83:  true, // frog_variant
+		84:  true, // painting_variant
+		85:  true, // shulker_variant
+		86:  true, // goat_variant
+		87:  true, // sniffer_variant
+		88:  true, // ghoul_variant
+		89:  true, // breeze_variant
+		90:  true, // bogged_variant
+		93:  true, // buckable
+		94:  true, // armor_trim
+		95:  true, // equippable_color
+		96:  true, // trim_material
+		97:  true, // trim_pattern
+		98:  true, // compass_color
+		99:  true, // map_display_color
+		101: true, // banner_pattern
+	}
+
+	if nbtTypes[componentType] {
 		return SkipNBT(r)
 	}
+
+	// 容器组件 (ID 73) 特殊处理
+	if componentType == 73 {
+		return skipContainerComponentData(r)
+	}
+
+	// 其他未知组件，尝试作为 NBT 跳过
+	if err := SkipNBT(r); err != nil {
+		logx.Debugf("SkipNBT failed for component type %d: %v", componentType, err)
+		if r.Len() > 0 {
+			logx.Debugf("Component type %d: attempting to skip remaining %d bytes", componentType, r.Len())
+			// 作为最后手段，尝试跳过剩余字节
+			_, err := r.Seek(int64(r.Len()), 1)
+			return err
+		}
+		return err
+	}
+	return nil
+}
+
+// skipContainerComponentData 跳过容器组件数据
+func skipContainerComponentData(r *bytes.Reader) error {
+	// 读取容器大小(忽略，仅用于验证)
+	_, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+
+	// 读取内容数量
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+
+	// 跳过所有槽位
+	for i := int32(0); i < count; i++ {
+		if err := skipSlotComponents(r); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // SkipNBT 跳过 Network NBT 格式 (无 name 字段)
@@ -258,15 +414,14 @@ func SkipNBT(r *bytes.Reader) error {
 	dec := nbt.NewDecoder(r).NetworkFormat(true)
 	err := dec.Skip()
 	if err != nil {
-		// 对于 EOF 或未知的 tag type，记录但不返回错误
-		// 这样可以避免因为一个组件解析失败而导致整个 packet 解析失败
-		if err.Error() == "unexpected EOF" ||
-			(len(err.Error()) > 18 && err.Error()[:18] == "unknown tag type: ") {
+		errMsg := err.Error()
+		if errMsg == "unexpected EOF" || strings.HasPrefix(errMsg, "unknown tag type: ") {
 			logx.Warnf("SkipNBT 警告: %v, 剩余 %d 字节", err, r.Len())
 			return nil
 		}
+		return err
 	}
-	return err
+	return nil
 }
 
 // ReadAnonymousNBTJSON 解析 Network NBT 并返回 JSON 字符串

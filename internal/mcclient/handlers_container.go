@@ -3,7 +3,6 @@ package mcclient
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,7 +146,9 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 		slot, err := packet.ReadSlotData(r)
 		if err != nil {
 			logx.PacketError("container_content", data, fmt.Errorf("slot %d: %w", i, err))
-			return nil
+			// 设置为空槽位并继续处理
+			items[i] = &player.SlotData{ID: 0, Count: 0}
+			continue
 		}
 		if slot != nil {
 			items[i] = &player.SlotData{ID: slot.ID, Count: slot.Count}
@@ -187,7 +188,7 @@ func (c *Client) dumpContainerPacket(packetName string, data []byte) error {
 
 	// 生成文件名
 	timestamp := time.Now().Format("20060102-150405")
-	filename := filepath.Join(dumpDir, fmt.Sprintf("%s_%s.txt", timestamp, packetName))
+	filename := filepath.Join(dumpDir, fmt.Sprintf("%s_%s.bin", timestamp, packetName))
 
 	// 创建文件
 	f, err := os.Create(filename)
@@ -197,21 +198,10 @@ func (c *Client) dumpContainerPacket(packetName string, data []byte) error {
 	}
 	defer f.Close()
 
-	// 写入头部信息
-	fmt.Fprintf(f, "# Packet: %s\n", packetName)
-	fmt.Fprintf(f, "# Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(f, "# Length: %d bytes\n", len(data))
-	fmt.Fprintln(f, "# --- HEX DUMP ---")
-
-	// 写入十六进制数据
-	hexData := hex.EncodeToString(data)
-	// 每行64个字符
-	for i := 0; i < len(hexData); i += 64 {
-		end := i + 64
-		if end > len(hexData) {
-			end = len(hexData)
-		}
-		fmt.Fprintln(f, hexData[i:end])
+	// 直接写入原始二进制数据
+	if _, err := f.Write(data); err != nil {
+		logx.Warnf("写入dump文件失败: %v", err)
+		return err
 	}
 
 	logx.Infof("dumped packet %s to %s (%d bytes)", packetName, filename, len(data))

@@ -1,9 +1,11 @@
-# 物品组件解析系统重构设计
+# 物品组件解析系统设计
 
 **日期**: 2026-03-24  
+**版本**: v2.0 - 组件内容解析版本
 **作者**: gmcc agent  
-**状态**: 设计中  
+**状态**: 设计中 → 实施中  
 **协议版本**: 774 (1.21.11)
+**实施阶段**: P0 基础类型实现
 
 **参考实现声明**: 本设计参考了 Tnze/go-mc 项目的组件系统设计，遵循 MIT License (Copyright (c) 2019 Tnze)。本设计仅借鉴其接口设计理念，具体实现方式采用处理器函数映射表模式。
 
@@ -13,58 +15,31 @@
 
 ### 1.1 背景
 
-当前系统使用 `component_skipping.go` 来跳过物品槽中的组件数据。这种方式虽然能避免解析错误，但丢弃了所有组件信息，无法支持后续功能（如显示物品自定义名称、附魔、容器内容等）。
-
-同时，代码结构存在以下问题：
-- 工具类分散在多个包中，部分可复用工具与Minecraft客户端紧耦合
-- 聊天处理流程依赖内部日志和国际化，难以复用和测试
-- 缺少统一的数据获取策略
+当前系统已实现基础架构，可以识别104种组件类型ID，但仅丢弃组件数据。为了获得完整的物品信息（如名称、附魔、耐久度、容器内容等），需要实现各组件的实际内容解析。
 
 ### 1.2 目标
 
-将组件处理从"跳过"改为"可扩展的解析"：
-- **默认行为**: 所有组件类型使用 `DiscardComponent` 处理器（读取并丢弃数据）
-- **可扩展**: 通过注册表模式，后续可为特定组件类型添加实际解析逻辑
-- **容器组件**: 预留特殊处理机制
+实现组件内容的完整解析：
+- **分阶段实施**: 优先实现常用组件（基础类型、文本组件、附魔等）
+- **数据结构**: 为每种组件类型定义专用的数据结构
+- **向后兼容**: 未实现的组件类型继续使用丢弃处理器
+- **容器组件**: 特殊处理，支持递归解析
 
-**架构优化目标：**
-- **工具类提取**: 将通用工具移至 `pkg/` 供其他模块复用
-- **聊天解耦**: 移除聊天处理对内部包（i18n/logx）的硬依赖
-- **数据标准化**: 建立明确的数据获取优先级策略
+**架构优化：**
+- **工具类复用**: 已完成 `pkg/binutil/` 工具提取
+- **聊天解耦**: 文本组件解析依赖聊天系统
+- **数据标准化**: 优先参考 Wiki，其次本地知识库
 
-### 1.3 非目标
-
-- 不一次性实现所有组件类型的解析
-- 不保留未解析组件的原始字节
-- 不修改容器处理逻辑的主体架构
-- 不重构协议常量定义（保持在 `internal/mcclient/protocol/`）
-
----
-
-## 2. 组件类型映射表
-
-参考官方 wiki (Data Components)，1.21.11 版本共有 120+ 种组件类型：
-
-| ID | 名称 | 处理器状态 |
-|----|------|-----------|
-| 0 | custom_data | DiscardComponent |
-| 1 | max_stack_size | DiscardComponent |
-| 2 | max_damage | DiscardComponent |
-| 3 | damage | DiscardComponent |
-| 4 | unbreakable | DiscardComponent |
-| 5 | use_effects | DiscardComponent |
-| 6 | custom_name | DiscardComponent |
-| ... | ... | ... |
-| 73 | container | DiscardComponent + 预留回调 |
-| ... | ... | ... |
-
-完整列表见 `component_handlers.go` 中的 `componentHandlers` 映射表。
+**实施状态：**
+- ✅ v1.0: 丢弃处理器阶段（已完成）
+- 🔄 v2.0: 组件内容解析阶段（进行中）
+- ⏳ v3.0: 完整组件支持（规划中）
 
 ---
 
 ## 3. 设计方案
 
-### 3.1 包结构重构
+### 3.1 包结构（保持 v1.0）
 
 新的包结构，将物品相关代码独立管理，工具函数上移：
 
@@ -100,21 +75,74 @@ pkg/
 
 ### 3.2 核心数据结构
 
-**internal/item/component/types.go:**
+**internal/item/component/parsers.go:**
 
 ```go
 package component
 
+import "bytes"
+
 // ComponentResult 组件解析结果
 type ComponentResult struct {
     TypeID int32
-    // Data 字段：已解析的组件数据（当前阶段通常为 nil）
-    // 后续扩展时根据组件类型存储具体数据
-    Data any
+    Data   any // 解析后的组件数据（具体类型取决于组件）
 }
 
-// ComponentHandler 组件处理函数签名
-type ComponentHandler func(r *bytes.Reader) (*ComponentResult, error)
+// Parsers 各类组件解析器集合
+type Parsers struct {
+    VarInt      ParserFunc[int32]
+    Bool        ParserFunc[bool]
+    Int32       ParserFunc[int32]
+    String      ParserFunc[string]
+    Enum        ParserFunc[string]
+    Text        ParserFunc[*TextComponent]
+    TextList    ParserFunc[[]*TextComponent]
+    NBT         ParserFunc[map[string]any]
+}
+```
+
+**internal/item/component/priority/parsers_varint.go:**
+
+```go
+package component
+
+import "bytes"
+
+// ParseMaxStackSize 解析 max_stack_size 组件 (ID: 1)
+func ParseMaxStackSize(r *bytes.Reader) (*ComponentResult, error) {
+    value, err := readVarInt(r)
+    if err != nil {
+        return nil, err
+    }
+    return &ComponentResult{
+        TypeID: MaxStackSize,
+        Data:   value,
+    }, nil
+}
+
+// ParseMaxDamage 解析 max_damage 组件 (ID: 2)
+func ParseMaxDamage(r *bytes.Reader) (*ComponentResult, error) {
+    value, err := readVarInt(r)
+    if err != nil {
+        return nil, err
+    }
+    return &ComponentResult{
+        TypeID: MaxDamage,
+        Data:   value,
+    }, nil
+}
+
+// ParseDamage 解析 damage 组件 (ID: 3)
+func ParseDamage(r *bytes.Reader) (*ComponentResult, error) {
+    value, err := readVarInt(r)
+    if err != nil {
+        return nil, err
+    }
+    return &ComponentResult{
+        TypeID: Damage,
+        Data:   value,
+    }, nil
+}
 ```
 
 **internal/item/component/handlers.go:**
@@ -153,7 +181,240 @@ type SlotData struct {
 }
 ```
 
-### 3.3 默认处理器实现
+### 3.3 处理器更新
+
+**internal/item/component/handlers.go:**
+
+```go
+package component
+
+// defaultHandlers 返回默认处理器映射（v2 - 包含实际解析器）
+func defaultHandlers() map[int32]ComponentHandler {
+    handlers := make(map[int32]ComponentHandler)
+    
+    // P0: 基础类型
+    handlers[MaxStackSize] = ParseMaxStackSize      // 1
+    handlers[MaxDamage] = ParseMaxDamage            // 2
+    handlers[Damage] = ParseDamage                  // 3
+    handlers[Unbreakable] = ParseUnbreakable        // 4
+    handlers[CustomModelData] = ParseInt32          // 17
+    handlers[RepairCost] = ParseVarInt              // 19
+    handlers[EnchantmentGlintOverride] = ParseBool  // 21
+    handlers[Enchantable] = ParseVarInt             // 31
+    handlers[DyedColor] = ParseInt32                // 42
+    handlers[MapColor] = ParseInt32                 // 43
+    handlers[MapID] = ParseVarInt                   // 44
+    
+    // P1: 常用显示组件（待实现）
+    // handlers[CustomName] = ParseCustomName        // 6
+    // handlers[ItemName] = ParseItemName            // 9
+    // handlers[Lore] = ParseLore                    // 11
+    // handlers[Rarity] = ParseRarity                // 12
+    // handlers[Enchantments] = ParseEnchantments    // 13
+    
+    // 其他组件：继续使用丢弃处理器
+    for typeID := MinComponentID; typeID <= MaxComponentID; typeID++ {
+        if _, exists := handlers[typeID]; !exists {
+            if typeID == Container {
+                handlers[typeID] = ContainerComponentHandler
+            } else {
+                handlers[typeID] = makeDiscardHandler(typeID)
+            }
+        }
+    }
+    
+    return handlers
+}
+```
+
+### 3.4 通用解析器函数
+
+**internal/item/component/common.go:**
+
+```go
+package component
+
+import (
+    "bytes"
+    "gmcc/internal/mcclient/packet"
+)
+
+// ParseVarInt 通用 VarInt 组件解析器
+func ParseVarInt(r *bytes.Reader) (*ComponentResult, error) {
+    value, err := packet.ReadVarIntFromReader(r)
+    if err != nil {
+        return nil, err
+    }
+    return &ComponentResult{Data: value}, nil
+}
+
+// ParseInt32 通用 Int32 组件解析器
+func ParseInt32(r *bytes.Reader) (*ComponentResult, error) {
+    value, err := packet.ReadInt32FromReader(r)
+    if err != nil {
+        return nil, err
+    }
+    return &ComponentResult{Data: value}, nil
+}
+
+// ParseBool 通用 Bool 组件解析器
+func ParseBool(r *bytes.Reader) (*ComponentResult, error) {
+    value, err := packet.ReadBoolFromReader(r)
+    if err != nil {
+        return nil, err
+    }
+    return &ComponentResult{Data: value}, nil
+}
+
+// ParseUnbreakable unbreakable 组件（无数据）
+func ParseUnbreakable(r *bytes.Reader) (*ComponentResult, error) {
+    return &ComponentResult{Data: true}, nil
+}
+```
+
+### 3.5 组件数据类型定义
+
+**internal/item/component/data.go:**
+
+```go
+package component
+
+// TextComponent 组件文本数据（引用聊天系统）
+type TextComponent struct {
+    // 引用 internal/mcclient/chat.TextComponent
+    // TODO: 解耦聊天系统后独立定义
+}
+
+// Rarity 稀有度枚举
+type Rarity string
+
+const (
+    RarityCommon   Rarity = "common"
+    RarityUncommon Rarity = "uncommon"
+    RarityRare     Rarity = "rare"
+    RarityEpic     Rarity = "epic"
+)
+
+// EnchantmentEntry 附魔条目
+type EnchantmentEntry struct {
+    // Enchantment 附魔类型标识
+    // Level 附魔等级
+}
+
+// UseEffects 使用效果
+type UseEffects struct {
+    CanSprint            bool
+    InteractVibrations   bool
+    SpeedMultiplier      float32
+}
+```
+
+---
+
+## 4. 实施计划
+
+### 4.1 阶段 0: 基础类型实现（1-2天）
+
+**目标**: 实现 P0 基础类型解析器
+
+**任务清单**:
+1. 创建 `internal/item/component/parsers_varint.go`
+2. 实现 11 个基础类型解析器
+3. 更新 `handlers.go` 默认映射表
+4. 编写单元测试
+
+**验证标准**:
+- 所有基础类型组件解析正确
+- 测试覆盖率 ≥ 80%
+- 与现有系统兼容
+
+### 4.2 阶段 1: 常用显示组件（2-3天）
+
+**目标**: 实现 P1 常用显示组件
+
+**任务清单**:
+1. 实现文本组件解析（依赖聊天系统）
+2. 实现 rarity 枚举解析
+3. 实现附魔列表解析
+4. 集成到 handlers
+
+**验证标准**:
+- custom_name 显示正确
+- lore 多行文本解析正确
+- 附魔信息完整
+
+### 4.3 阶段 2: 复杂结构（3-4天）
+
+**目标**: 实现 P2 复杂结构
+
+**任务清单**:
+1. 实现 use_effects 记录结构
+2. 实现 potion_contents 解析
+3. 实现 trim 纹饰结构
+4. 优化容器组件嵌套解析
+
+### 4.4 阶段 3: 全面集成（1-2天）
+
+**目标**: 完整集成和优化
+
+**任务清单**:
+1. 性能优化
+2. 文档更新
+3. 完整测试
+4. 代码审查
+
+---
+
+## 5. 测试策略
+
+### 5.1 单元测试
+
+```go
+// internal/item/component/parsers_varint_test.go
+func TestParseMaxStackSize(t *testing.T) {
+    tests := []struct {
+        name  string
+        data  []byte
+        want  int32
+        errMsg string
+    }{
+        {"default", []byte{0x40}, 64, ""},
+        {"small", []byte{0x01}, 1, ""},
+        {"invalid", []byte{}, 0, "unexpected EOF"},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            r := bytes.NewReader(tt.data)
+            result, err := ParseMaxStackSize(r)
+            
+            if tt.errMsg != "" {
+                if err == nil {
+                    t.Errorf("Expected error containing %q", tt.errMsg)
+                }
+                return
+            }
+            
+            if err != nil {
+                t.Fatalf("Unexpected error: %v", err)
+            }
+            if result.TypeID != MaxStackSize {
+                t.Errorf("TypeID = %d, want %d", result.TypeID, MaxStackSize)
+            }
+            if result.Data != tt.want {
+                t.Errorf("Data = %v, want %v", result.Data, tt.want)
+            }
+        })
+    }
+}
+```
+
+### 5.2 集成测试
+
+使用真实服务器数据验证：
+- 连接到 1.21.11 测试服务器
+- 解析不同物品组件
+- 对比与客户端显示
 
 **internal/item/component/discard.go:**
 
