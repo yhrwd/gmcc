@@ -52,8 +52,8 @@ actions:
     - "list"
   on_join_messages:         # 入服后自动发送的消息
     - "大家好"
-  sign_commands: false      # 是否签名命令
-  default_sign_commands: true
+  sign_commands: false      # 入服命令是否签名
+  default_sign_commands: true  # 默认命令签名行为
 
 commands:
   enabled: false            # 启用机器人命令系统

@@ -80,8 +80,8 @@ actions:
     - "list"
   on_join_messages:
     - "大家好"
-  sign_commands: false
-  default_sign_commands: true
+  sign_commands: false        # 入服命令是否签名
+  default_sign_commands: true # 默认命令签名行为
 
 commands:
   enabled: false
