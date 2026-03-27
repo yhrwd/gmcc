@@ -118,9 +118,9 @@ func (m *ConfigMerger) mergeStructFields(currentVal, defaultVal reflect.Value, p
 	if currentVal.CanAddr() {
 		_ = currentVal.Addr().Interface()
 
-		// 遍历结构体字段
-		for i := 0; i < currentVal.NumField(); i++ {
-			field := currentVal.Type().Field(i)
+		// 遍历默认结构体的所有字段，确保处理所有字段
+		for i := 0; i < defaultVal.NumField(); i++ {
+			field := defaultVal.Type().Field(i)
 			if !field.IsExported() {
 				continue
 			}
@@ -136,8 +136,16 @@ func (m *ConfigMerger) mergeStructFields(currentVal, defaultVal reflect.Value, p
 			}
 			fieldPath += yamlTag
 
-			currentFieldValue := currentVal.Field(i)
 			defaultFieldValue := defaultVal.Field(i)
+
+			// 获取当前结构体中的对应字段
+			var currentFieldValue reflect.Value
+			if currentVal.Type().Field(i).Name == field.Name {
+				currentFieldValue = currentVal.Field(i)
+			} else {
+				// 字段名不匹配，尝试通过名称查找
+				currentFieldValue = currentVal.FieldByName(field.Name)
+			}
 
 			mergedValue, err := m.mergeStruct(
 				currentFieldValue.Interface(),
@@ -196,13 +204,43 @@ func (m *ConfigMerger) needsUpdate(current *Config) (bool, error) {
 		return true, nil
 	}
 
+	defaultCfg := Default()
+
+	// 检查是否有零值字段需要从默认配置填充
+	if current.Server.Address == "" && defaultCfg.Server.Address != "" {
+		return true, nil
+	}
+	if current.Log.LogDir == "" && defaultCfg.Log.LogDir != "" {
+		return true, nil
+	}
+	if current.Actions.DelayMs == 0 && defaultCfg.Actions.DelayMs != 0 {
+		return true, nil
+	}
+	if current.Log.MaxSize == 0 && defaultCfg.Log.MaxSize != 0 {
+		return true, nil
+	}
+
+	// 检查 Actions 结构体中的布尔字段
+	// DefaultSignCommands 默认为 true，如果当前是 false（零值），需要更新
+	if !current.Actions.DefaultSignCommands && defaultCfg.Actions.DefaultSignCommands {
+		return true, nil
+	}
+
+	// 检查切片字段是否需要默认值
+	if current.Actions.OnJoinCommands == nil && defaultCfg.Actions.OnJoinCommands != nil {
+		return true, nil
+	}
+	if current.Actions.OnJoinMessages == nil && defaultCfg.Actions.OnJoinMessages != nil {
+		return true, nil
+	}
+
+	// 使用合并方法作为最终检查
 	_, foundChanges, err := m.MergeWithDefault(current)
 	if err != nil {
 		return false, fmt.Errorf("检查更新失败: %w", err)
 	}
 
-	needsUpdate := len(foundChanges) > 0
-	return needsUpdate, nil
+	return len(foundChanges) > 0, nil
 }
 
 // GetFieldPath 获取字段的配置路径

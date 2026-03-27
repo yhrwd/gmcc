@@ -177,6 +177,9 @@ func formatUUIDShort(uuid [16]byte) string {
 }
 
 func (c *Client) findPlayerNameByUUID(uuid [16]byte) string {
+	c.playersMu.RLock()
+	defer c.playersMu.RUnlock()
+
 	for name, info := range c.players {
 		if info.uuid == uuid {
 			return name

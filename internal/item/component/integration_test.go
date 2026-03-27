@@ -88,17 +88,17 @@ func TestHandlerRegistration(t *testing.T) {
 		}
 
 		testData := map[int32][]byte{
-			MaxStackSize:             []byte{0x01},
-			MaxDamage:                []byte{0x01},
-			Damage:                   []byte{0x00},
-			Unbreakable:              []byte{},
-			CustomModelData:          []byte{0x00, 0x00, 0x00, 0x00},
-			RepairCost:               []byte{0x00},
-			EnchantmentGlintOverride: []byte{0x00},
-			Enchantable:              []byte{0x00},
-			DyedColor:                []byte{0x00, 0x00, 0x00, 0x00},
-			MapColor:                 []byte{0x00, 0x00, 0x00, 0x00},
-			MapID:                    []byte{0x00},
+			MaxStackSize:             {0x01},
+			MaxDamage:                {0x01},
+			Damage:                   {0x00},
+			Unbreakable:              {},
+			CustomModelData:          {0x00, 0x00, 0x00, 0x00},
+			RepairCost:               {0x00},
+			EnchantmentGlintOverride: {0x00},
+			Enchantable:              {0x00},
+			DyedColor:                {0x00, 0x00, 0x00, 0x00},
+			MapColor:                 {0x00, 0x00, 0x00, 0x00},
+			MapID:                    {0x00},
 		}
 
 		for typeID, name := range p0Components {
@@ -157,17 +157,17 @@ func TestAllP0ComponentsFunctional(t *testing.T) {
 	parser := NewParser()
 
 	testCases := map[int32][]byte{
-		MaxStackSize:             []byte{0x40},
-		MaxDamage:                []byte{0x98, 0x01},
-		Damage:                   []byte{0x05},
-		Unbreakable:              []byte{},
-		CustomModelData:          []byte{0x00, 0x00, 0x00, 0x01},
-		RepairCost:               []byte{0x01},
-		EnchantmentGlintOverride: []byte{0x01},
-		Enchantable:              []byte{0x0A},
-		DyedColor:                []byte{0xFF, 0x55, 0x00, 0x00},
-		MapColor:                 []byte{0x00, 0x00, 0xFF, 0x00},
-		MapID:                    []byte{0x06},
+		MaxStackSize:             {0x40},
+		MaxDamage:                {0x98, 0x01},
+		Damage:                   {0x05},
+		Unbreakable:              {},
+		CustomModelData:          {0x00, 0x00, 0x00, 0x01},
+		RepairCost:               {0x01},
+		EnchantmentGlintOverride: {0x01},
+		Enchantable:              {0x0A},
+		DyedColor:                {0xFF, 0x55, 0x00, 0x00},
+		MapColor:                 {0x00, 0x00, 0xFF, 0x00},
+		MapID:                    {0x06},
 	}
 
 	for typeID, data := range testCases {

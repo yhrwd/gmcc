@@ -48,17 +48,34 @@ func (c *Client) handleAddEntity(data []byte) error {
 	}
 
 	// 读取角度
-	_, _ = packet.ReadU8(r) // pitch
-	_, _ = packet.ReadU8(r) // yaw
-	_, _ = packet.ReadU8(r) // head_yaw
+	if _, err := packet.ReadU8(r); err != nil {
+		return fmt.Errorf("读取pitch失败: %w", err)
+	}
+	if _, err := packet.ReadU8(r); err != nil {
+		return fmt.Errorf("读取yaw失败: %w", err)
+	}
+	if _, err := packet.ReadU8(r); err != nil {
+		return fmt.Errorf("读取head_yaw失败: %w", err)
+	}
 
 	// 读取实体数据
-	_, _ = packet.ReadVarInt(r)
+	if _, err := packet.ReadVarInt(r); err != nil {
+		return fmt.Errorf("读取实体数据失败: %w", err)
+	}
 
 	// 读取速度
-	vx, _ := readFloat64(r)
-	vy, _ := readFloat64(r)
-	vz, _ := readFloat64(r)
+	vx, err := readFloat64(r)
+	if err != nil {
+		return fmt.Errorf("读取速度X失败: %w", err)
+	}
+	vy, err := readFloat64(r)
+	if err != nil {
+		return fmt.Errorf("读取速度Y失败: %w", err)
+	}
+	vz, err := readFloat64(r)
+	if err != nil {
+		return fmt.Errorf("读取速度Z失败: %w", err)
+	}
 
 	// 转换为实体类型字符串 (简化处理，实际应该查注册表)
 	entityType := fmt.Sprintf("minecraft:entity_%d", entityTypeID)
@@ -106,19 +123,33 @@ func (c *Client) handleTeleportEntity(data []byte) error {
 	}
 
 	// 读取相对标志
-	_, _ = packet.ReadU8(r)
+	if _, err := packet.ReadU8(r); err != nil {
+		return fmt.Errorf("读取相对标志失败: %w", err)
+	}
 
 	// 读取速度
-	_, _ = readFloat64(r)
-	_, _ = readFloat64(r)
-	_, _ = readFloat64(r)
+	if _, err := readFloat64(r); err != nil {
+		return fmt.Errorf("读取速度失败: %w", err)
+	}
+	if _, err := readFloat64(r); err != nil {
+		return fmt.Errorf("读取速度失败: %w", err)
+	}
+	if _, err := readFloat64(r); err != nil {
+		return fmt.Errorf("读取速度失败: %w", err)
+	}
 
 	// 读取旋转
-	_, _ = readFloat32(r) // yaw
-	_, _ = readFloat32(r) // pitch
+	if _, err := readFloat32(r); err != nil {
+		return fmt.Errorf("读取yaw失败: %w", err)
+	}
+	if _, err := readFloat32(r); err != nil {
+		return fmt.Errorf("读取pitch失败: %w", err)
+	}
 
 	// 读取onGround
-	_, _ = packet.ReadBool(r)
+	if _, err := packet.ReadBool(r); err != nil {
+		return fmt.Errorf("读取onGround失败: %w", err)
+	}
 
 	if c.entityTracker != nil {
 		newPos := entity.Position{X: x, Y: y, Z: z}
@@ -151,7 +182,9 @@ func (c *Client) handleMoveEntityPos(data []byte) error {
 	}
 
 	// 读取onGround
-	_, _ = packet.ReadBool(r)
+	if _, err := packet.ReadBool(r); err != nil {
+		return fmt.Errorf("读取onGround失败: %w", err)
+	}
 
 	if c.entityTracker != nil {
 		c.entityTracker.UpdatePositionDelta(int32(entityID), deltaX, deltaY, deltaZ)

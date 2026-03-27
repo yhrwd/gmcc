@@ -90,6 +90,7 @@ type BotAdapter interface {
     GetPlayerID() string              // 获取玩家名
     GetUUID() string                  // 获取UUID
     GetPosition() (x, y, z float64)   // 获取当前位置
+    GetRotation() (yaw, pitch float32) // 获取当前视角
     
     // 聊天操作
     SendChat(msg string) error        // 发送聊天消息
@@ -128,7 +129,7 @@ type Message struct {
 type PlayerInfo struct {
     Name      string
     UUID      string
-    Position  (x, y, z float64)
+    Position  struct{ X, Y, Z float64 }
     EntityID  int32
 }
 ```
@@ -208,37 +209,279 @@ type Command interface {
 
 ---
 
-## 4. 指令路由器
+## 4. 消息解析器
 
-### 4.1 Router结构
+### 4.1 设计目的
+
+不同服务器的私聊消息格式可能不同，需要将消息解析逻辑独立为可插拔组件，方便手动适配。
+
+### 4.2 Parser接口
+
+```go
+// MessageParser 消息解析器接口
+// 用户可通过实现此接口适配不同服务器的私信格式
+type MessageParser interface {
+    // Parse 解析原始聊天消息，返回标准化的Message
+    // 返回 nil 表示这不是一条有效的指令消息
+    Parse(rawChat RawChat) *Message
+}
+
+// RawChat 原始聊天消息（来自mcclient）
+type RawChat struct {
+    Type        string    // player_chat, system_chat
+    PlainText   string    // 纯文本内容
+    RawJSON     string    // 原始JSON
+    SenderName  string    // 发送者名称（可能为空）
+    SenderUUID  [16]byte  // 发送者UUID
+    Timestamp   time.Time
+}
+```
+
+### 4.3 默认实现
+
+```go
+// DefaultParser 默认消息解析器
+// 适用于大多数标准Minecraft服务器
+// 支持 /tell 和 /msg 两种私聊格式
+type DefaultParser struct {
+    prefix string
+}
+
+func NewDefaultParser(prefix string) *DefaultParser {
+    return &DefaultParser{prefix: prefix}
+}
+
+func (p *DefaultParser) Parse(raw RawChat) *Message {
+    // 1. 判断是否为私聊
+    isPrivate, sender, content := p.detectPrivateChat(raw)
+    if !isPrivate {
+        return nil
+    }
+    
+    // 2. 移除私聊前缀后检查指令前缀
+    if !strings.HasPrefix(content, p.prefix) {
+        return nil
+    }
+    
+    return &Message{
+        Type:       raw.Type,
+        PlainText:  content,
+        RawJSON:    raw.RawJSON,
+        Sender:     sender,
+        SenderUUID: packet.FormatUUID(raw.SenderUUID),
+        IsPrivate:  true,
+        Timestamp:  raw.Timestamp,
+    }
+}
+
+// detectPrivateChat 检测私聊格式
+// 返回: (是否私聊, 发送者, 私聊内容)
+func (p *DefaultParser) detectPrivateChat(raw RawChat) (bool, string, string) {
+    text := raw.PlainText
+    
+    // 格式1: "玩家私聊消息" (某些服务器)
+    // 格式2: "[玩家 -> 你] 消息"
+    // 格式3: "玩家 whispers: 消息"
+    
+    // 尝试匹配常见私聊格式
+    patterns := []struct {
+        regex   *regexp.Regexp
+        extract func([]string) (string, string)
+    }{
+        // /tell 格式: "[Player -> 你] message"
+        {
+            regexp.MustCompile(`^\[([^\]]+) -> 你\] (.+)$`),
+            func(m []string) (string, string) { return m[1], m[2] },
+        },
+        // /msg 格式: "玩家 whispers to you: message"
+        {
+            regexp.MustCompile(`^([^\s]+) whispers (?:to you:|to you from [^:]+:)? (.+)$`),
+            func(m []string) (string, string) { return m[1], m[2] },
+        },
+    }
+    
+    for _, p := range patterns {
+        if m := p.regex.FindStringSubmatch(text); m != nil {
+            sender, content := p.extract(m)
+            return true, sender, content
+        }
+    }
+    
+    // 如果有明确发送者（非系统消息），检查是否包含私聊标记
+    if raw.SenderName != "" && raw.Type != "system_chat" {
+        // 某些服务器私聊会直接显示发送者名称
+        // 用户可根据服务器特性自定义此逻辑
+        return false, "", ""
+    }
+    
+    return false, "", ""
+}
+```
+
+### 4.4 自定义解析器示例
+
+```go
+// CustomParser 用户自定义解析器
+// 根据服务器实际私聊格式手动修改此文件
+// 示例: 某服务器格式 "[发送者 ➥ 接收者] 消息"
+type CustomParser struct {
+    prefix      string
+    botName     string              // Bot玩家名，用于识别接收者
+    jsonPattern  *regexp.Regexp    // JSON格式提取正则
+}
+
+func NewCustomParser(prefix string, botName string) *CustomParser {
+    // 格式: [发送者 ➥ 接收者] 消息内容
+    // 例如: [YHRWD ➥ YHRWD] Hello
+    jsonPattern := regexp.MustCompile(`^\[([^\s➥]+)\s*➥\s*([^\]]+)\]\s*(.+)$`)
+    
+    return &CustomParser{
+        prefix:     prefix,
+        botName:    botName,
+        jsonPattern: jsonPattern,
+    }
+}
+
+func (p *CustomParser) Parse(raw RawChat) *Message {
+    // 1. 解析JSON获取纯文本（如果PlainText不准确）
+    text := p.extractPlainText(raw)
+    
+    // 2. 匹配私聊格式: [发送者 ➥ 接收者] 消息
+    matches := p.jsonPattern.FindStringSubmatch(text)
+    if matches == nil {
+        return nil
+    }
+    
+    sender := matches[1]
+    receiver := matches[2]
+    content := matches[3]
+    
+    // 3. 检查接收者是否为Bot（确认是发给Bot的私聊）
+    if receiver != p.botName && !strings.EqualFold(receiver, p.botName) {
+        return nil  // 不是发给Bot的消息
+    }
+    
+    // 4. 检查指令前缀
+    if !strings.HasPrefix(content, p.prefix) {
+        return nil
+    }
+    
+    // 5. 尝试从JSON中获取发送者UUID
+    senderUUID := p.extractSenderUUID(raw)
+    
+    return &Message{
+        Type:       raw.Type,
+        PlainText:  content,
+        RawJSON:    raw.RawJSON,
+        Sender:     sender,
+        SenderUUID: senderUUID,
+        IsPrivate:  true,
+        Timestamp:  raw.Timestamp,
+    }
+}
+
+// extractPlainText 从JSON extra数组提取纯文本
+func (p *CustomParser) extractPlainText(raw RawChat) string {
+    if raw.PlainText != "" {
+        return raw.PlainText
+    }
+    
+    // 解析JSON提取text字段
+    // JSON格式: {"extra":[{"text":"["},{"text":"YHRWD "},...],"text":""}
+    type jsonExtra struct {
+        Extra []struct {
+            Text string `json:"text"`
+        } `json:"extra"`
+        Text string `json:"text"`
+    }
+    
+    var jsonMsg jsonExtra
+    if err := json.Unmarshal([]byte(raw.RawJSON), &jsonMsg); err != nil {
+        return ""
+    }
+    
+    var sb strings.Builder
+    for _, e := range jsonMsg.Extra {
+        sb.WriteString(e.Text)
+    }
+    sb.WriteString(jsonMsg.Text)
+    return sb.String()
+}
+
+// extractSenderUUID 尝试从JSON中提取发送者UUID
+// 某些服务器会在hover_event或特定字段中包含UUID
+func (p *CustomParser) extractSenderUUID(raw RawChat) string {
+    // 如果RawChat已包含UUID，直接返回
+    if raw.SenderUUID != [16]byte{} {
+        return packet.FormatUUID(raw.SenderUUID)
+    }
+    
+    // 尝试从hover_event中提取
+    // JSON格式可能包含: {"hover_event":{"action":"show_text","value":"..."}}
+    // 需要根据具体服务器格式解析
+    
+   return ""  // 无法获取UUID，返回空
+}
+```
+
+### 4.6 配置示例
+
+```yaml
+commands:
+  prefix: "!"
+  
+  # Bot玩家名（用于私聊识别）
+  bot_name: "Bot001"
+  
+  # 解析器类型: default, custom
+  parser: custom
+```
+
+### 4.7 文件位置
+
+```
+internal/commands/
+├── parser.go              # Parser接口定义
+├── parser_default.go      # 默认解析器实现
+└── parser_custom.go       # 用户自定义解析器（可手动修改）
+```
+
+---
+
+## 5. 指令路由器
+
+### 5.1 Router结构
 
 ```go
 // Router 指令路由器
 type Router struct {
     bot          BotAdapter
     commands     map[string]Command
+    parser       MessageParser           // 消息解析器（可替换）
     prefix       string                 // 指令前缀，默认 "!"
     auth         *AuthManager           // 鉴权管理器
     config       *RouterConfig          // 路由器配置
     
     // 状态
     currentCmd   Command                // 当前执行的指令
-    cmdMu        sync.RWMutex
+    cmdMu         sync.RWMutex
 }
 ```
 
-### 4.2 消息处理流程
+### 5.2 消息处理流程
 
 ```go
-func (r *Router) HandleMessage(msg Message) {
+// HandleRawChat 处理原始聊天消息（来自mcclient）
+func (r *Router) HandleRawChat(raw RawChat) {
     // 1. 检查是否在线
     if !r.bot.IsOnline() {
         return
     }
     
-    // 2. 检查是否是私聊
-    if !msg.IsPrivate {
-        return  // 只处理私聊
+    // 2. 使用解析器解析消息
+    msg := r.parser.Parse(raw)
+    if msg == nil {
+        return  // 不是有效的指令消息
     }
     
     // 3. 检查是否有指令前缀
@@ -250,7 +493,7 @@ func (r *Router) HandleMessage(msg Message) {
     cmdName, args := r.parseCommand(msg.PlainText)
     
     // 5. 鉴权检查
-    if !r.auth.Check(&msg) {
+    if !r.auth.Check(msg) {
         r.bot.SendPrivateMessage(msg.Sender, "你没有权限使用此机器人")
         return
     }
@@ -265,7 +508,7 @@ func (r *Router) HandleMessage(msg Message) {
     // 7. 创建上下文
     ctx := &Context{
         Bot:     r.bot,
-        Message: msg,
+        Message: *msg,
         Sender:  msg.Sender,
         Args:    args,
     }
@@ -278,9 +521,14 @@ func (r *Router) HandleMessage(msg Message) {
         r.bot.SendPrivateMessage(msg.Sender, result.Message)
     }
 }
+
+// SetParser 替换消息解析器（用于自定义服务器）
+func (r *Router) SetParser(parser MessageParser) {
+    r.parser = parser
+}
 ```
 
-### 4.3 指令解析
+### 5.3 指令解析
 
 ```go
 func (r *Router) parseCommand(text string) (string, []string) {
@@ -302,9 +550,9 @@ func (r *Router) parseCommand(text string) (string, []string) {
 
 ---
 
-## 5. 鉴权系统
+## 6. 鉴权系统
 
-### 5.1 AuthManager
+### 6.1 AuthManager
 
 ```go
 // AuthManager 鉴权管理器
@@ -315,7 +563,7 @@ type AuthManager struct {
 }
 ```
 
-### 5.2 鉴权检查
+### 6.2 鉴权检查
 
 ```go
 // Check 检查玩家是否有权限
@@ -342,7 +590,7 @@ func (a *AuthManager) Check(msg *Message) bool {
 }
 ```
 
-### 5.3 配置示例
+### 6.3 配置示例
 
 ```yaml
 auth:
@@ -357,9 +605,9 @@ auth:
 
 ---
 
-## 6. 状态机
+## 7. 状态机
 
-### 6.1 状态流转图
+### 7.1 状态流转图
 
 ```
 ┌─────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  ┌─────────┐
@@ -375,7 +623,7 @@ auth:
      └───────────────────────────────────────────────────┘
 ```
 
-### 6.2 状态说明
+### 7.2 状态说明
 
 | 状态 | 说明 | 进入条件 | 退出条件 |
 |------|------|---------|---------|
@@ -387,30 +635,31 @@ auth:
 
 ---
 
-## 7. !ride 指令实现
+## 8. !ride 指令实现
 
-### 7.1 模块结构
+### 8.1 模块结构
 
 ```go
 // RideCommand !ride指令实现
 type RideCommand struct {
-    bot         BotAdapter
-    config      *RideConfig
+    bot            BotAdapter
+    config         *RideConfig
     
     // 状态
-    state       StateType
-    target      string              // 目标玩家名
-    startTime   time.Time           // 开始时间
-    yawTarget   float32             // 目标Yaw
-    pitchTarget float32              // 目标Pitch
+    state          StateType
+    target         string              // 目标玩家名
+    startTime      time.Time           // 开始时间
+    lastFeedback   time.Time           // 上次反馈时间
+    yawTarget      float32             // 目标Yaw
+    pitchTarget    float32             // 目标Pitch
     
     // 配置
-    timeout     time.Duration       // 超时时间，默认60秒
-    rangeLimit  float64             // 交互范围，默认4格
+    timeout        time.Duration       // 超时时间，默认60秒
+    rangeLimit     float64             // 交互范围，默认4格
 }
 ```
 
-### 7.2 配置结构
+### 8.2 配置结构
 
 ```go
 // RideConfig !ride模块配置
@@ -432,7 +681,7 @@ type RideConfig struct {
 }
 ```
 
-### 7.3 Execute 方法
+### 8.3 Execute 方法
 
 ```go
 func (r *RideCommand) Execute(ctx *Context) *Result {
@@ -485,7 +734,7 @@ func (r *RideCommand) Execute(ctx *Context) *Result {
 }
 ```
 
-### 7.4 Tick 方法（每帧更新）
+### 8.4 Tick 方法（每帧更新）
 
 ```go
 func (r *RideCommand) Tick(ctx *Context) *Result {
@@ -557,7 +806,8 @@ func (r *RideCommand) Tick(ctx *Context) *Result {
         }
         
         // 持续反馈距离（每5秒一次）
-        if time.Since(r.startTime)%5*time.Second == 0 {
+        if time.Since(r.lastFeedback) > 5*time.Second {
+            r.lastFeedback = time.Now()
             return &Result{
                 Success: true,
                 Message: fmt.Sprintf("已锁定 %s，距离 %.1f 格，请继续靠近...", r.target, dist),
@@ -584,7 +834,7 @@ func (r *RideCommand) Tick(ctx *Context) *Result {
 }
 ```
 
-### 7.5 视角锁定
+### 8.5 视角锁定
 
 ```go
 // updateLookAt 更新视角看向目标
@@ -625,9 +875,8 @@ func (r *RideCommand) smoothLookAt(pos Position) {
         smoothing = 0.1 // 默认平滑系数
     }
     
-    // 获取当前视角（需要从Bot获取）
-    currentYaw := float32(0) // TODO: 从Bot获取当前视角
-    currentPitch := float32(0)
+    // 获取当前视角
+    currentYaw, currentPitch := r.bot.GetRotation()
     
     newYaw := currentYaw + (yaw - currentYaw) * smoothing
     newPitch := currentPitch + (pitch - currentPitch) * smoothing
@@ -637,7 +886,7 @@ func (r *RideCommand) smoothLookAt(pos Position) {
 }
 ```
 
-### 7.6 执行骑乘
+### 8.6 执行骑乘
 
 ```go
 // executeRide 执行骑乘
@@ -668,9 +917,9 @@ func (r *RideCommand) executeRide(ctx *Context, target PlayerInfo) *Result {
 
 ---
 
-## 8. Bot适配器实现
+## 9. Bot适配器实现
 
-### 8.1 结构
+### 9.1 结构
 
 ```go
 // ClientAdapter Bot适配器，实现BotAdapter接口
@@ -684,7 +933,7 @@ type ClientAdapter struct {
 }
 ```
 
-### 8.2 接口实现
+### 9.2 接口实现
 
 ```go
 func (c *ClientAdapter) GetPlayerID() string {
@@ -742,27 +991,29 @@ func (c *ClientAdapter) SetYawPitch(yaw, pitch float32) {
 }
 ```
 
-### 8.3 视角数据包
+### 9.3 视角数据包
 
 ```go
 func (c *ClientAdapter) sendPlayerRotation() {
-    // Minecraft协议：Player Rotation 包 (0x1B)
-    // 字段：Yaw (float), Pitch (float), OnGround (boolean)
+    // Minecraft协议：Serverbound Move Player Rotation 包 (0x1A)
+    // 需要在 protocol/v774.go 中添加常量:
+    //   PlayServerMovePlayerRotation int32 = 0x1A
+    // 字段：Yaw (float32), Pitch (float32), OnGround (boolean)
     
     payload := make([]byte, 0, 9)
     payload = append(payload, packet.EncodeFloat32(c.currentYaw)...)
     payload = append(payload, packet.EncodeFloat32(c.currentPitch)...)
     payload = append(payload, packet.EncodeBool(true)...) // OnGround
     
-    c.client.SendPacket(protocol.PlayClientPlayerRotation, payload)
+    c.client.SendPacket(protocol.PlayServerMovePlayerRotation, payload)
 }
 ```
 
 ---
 
-## 9. 配置格式
+## 10. 配置格式
 
-### 9.1 指令系统配置
+### 10.1 指令系统配置
 
 ```yaml
 # config.yaml
@@ -788,7 +1039,7 @@ commands:
       look_smoothing: 0.1  # 视角平滑系数
 ```
 
-### 9.2 默认配置常量
+### 10.2 默认配置常量
 
 ```go
 const (
@@ -802,9 +1053,9 @@ const (
 
 ---
 
-## 10. 使用示例
+## 11. 使用示例
 
-### 10.1 初始化
+### 11.1 初始化
 
 ```go
 // 创建Bot适配器
@@ -814,6 +1065,10 @@ bot := adapter.NewClientAdapter(client, cfg)
 router := commands.NewRouter(bot, &commands.RouterConfig{
     Prefix: cfg.Commands.Prefix,
 })
+
+// 设置自定义解析器（根据服务器格式）
+customParser := parser.NewCustomParser(cfg.Commands.Prefix, bot.GetPlayerName())
+router.SetParser(customParser)
 
 // 配置鉴权
 router.SetAuth(&commands.AuthManager{
@@ -827,18 +1082,18 @@ router.RegisterCommand(rideCmd)
 
 // 设置聊天处理器
 client.SetChatHandler(func(msg mcclient.ChatMessage) {
-    // 转换为Message
-    m := commands.Message{
+    // 转换为RawChat
+    raw := commands.RawChat{
         Type:       msg.Type,
         PlainText:  msg.PlainText,
         RawJSON:    msg.RawJSON,
+        SenderName: msg.SenderName,
         SenderUUID: msg.SenderUUID,
         Timestamp:  msg.ReceivedAt,
-        IsPrivate:  detectPrivate(msg),
     }
     
     // 处理消息
-    router.HandleMessage(m)
+    router.HandleRawChat(raw)
     
     // 更新指令状态
     if router.CurrentCommand() != nil {
@@ -847,7 +1102,7 @@ client.SetChatHandler(func(msg mcclient.ChatMessage) {
 })
 ```
 
-### 10.2 发送指令
+### 11.2 发送指令
 
 ```bash
 # 玩家发送私聊给Bot
@@ -862,9 +1117,9 @@ client.SetChatHandler(func(msg mcclient.ChatMessage) {
 
 ---
 
-## 11. 模块化更新
+## 12. 模块化更新
 
-### 11.1 热更新接口
+### 12.1 热更新接口
 
 ```go
 // ModuleLoader 模块加载器
@@ -876,7 +1131,7 @@ type ModuleLoader interface {
 }
 ```
 
-### 11.2 模块接口
+### 12.2 模块接口
 
 ```go
 // Module 指令模块接口
@@ -908,9 +1163,9 @@ func (r *Registry) Register(cmd Command) error {
 
 ---
 
-## 12. 错误处理
+## 13. 错误处理
 
-### 12.1 错误类型
+### 13.1 错误类型
 
 ```go
 // CommandError 指令错误
@@ -938,7 +1193,7 @@ var (
 )
 ```
 
-### 12.2 错误反馈
+### 13.2 错误反馈
 
 ```go
 func (r *RideCommand) sendError(ctx *Context, err *CommandError) {
@@ -953,9 +1208,9 @@ func (r *RideCommand) sendError(ctx *Context, err *CommandError) {
 
 ---
 
-## 13. 日志记录
+## 14. 日志记录
 
-### 13.1 日志格式
+### 14.1 日志格式
 
 ```go
 // 格式：[时间] [Bot] [指令] [发送者] [目标] [状态] [消息]
@@ -972,7 +1227,7 @@ type CommandLog struct {
 }
 ```
 
-### 13.2 日志输出
+### 14.2 日志输出
 
 ```go
 func (r *RideCommand) log(result *Result, ctx *Context) {
@@ -996,10 +1251,14 @@ func (r *RideCommand) log(result *Result, ctx *Context) {
 
 ---
 
-## 14. 实现计划
+## 15. 实现计划
 
 ### Phase 1: 核心框架（Day 1-2）
 - [ ] 定义接口和类型（types.go）
+- [ ] 添加协议常量 `PlayServerMovePlayerRotation` 到 `protocol/v774.go`
+- [ ] 实现消息解析器接口（parser.go）
+- [ ] 实现默认解析器（parser_default.go）
+- [ ] 实现自定义解析器（parser_custom.go）
 - [ ] 实现Bot适配器（adapter/bot_adapter.go）
 - [ ] 实现路由器（router.go）
 - [ ] 实现鉴权系统（auth.go）
@@ -1022,9 +1281,9 @@ func (r *RideCommand) log(result *Result, ctx *Context) {
 
 ---
 
-## 15. 测试用例
+## 16. 测试用例
 
-### 15.1 单元测试
+### 16.1 单元测试
 
 ```go
 func TestAuthManager_Check(t *testing.T) {
@@ -1054,7 +1313,7 @@ func TestAuthManager_Check(t *testing.T) {
 }
 ```
 
-### 15.2 集成测试
+### 16.2 集成测试
 
 ```go
 func TestRideCommand_Execute(t *testing.T) {
@@ -1088,9 +1347,9 @@ func TestRideCommand_Execute(t *testing.T) {
 
 ---
 
-## 16. 附录
+## 17. 附录
 
-### 16.1 常量定义
+### 17.1 常量定义
 
 ```go
 // 视角范围
@@ -1112,7 +1371,7 @@ const (
 )
 ```
 
-### 16.2 依赖
+### 17.2 依赖
 
 ```go
 import (

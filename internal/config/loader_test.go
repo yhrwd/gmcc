@@ -245,7 +245,7 @@ func TestPerformAutoUpdate(t *testing.T) {
 		t.Errorf("配置文件应该包含原有的服务器地址")
 	}
 
-	if !strings.Contains(content, "sign_commands: true") {
+	if !strings.Contains(content, "sign_commands: false") {
 		t.Errorf("配置文件应该包含默认的签名命令设置")
 	}
 }

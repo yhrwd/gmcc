@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -124,13 +125,9 @@ func cleanOldBackups() error {
 	}
 
 	// 按修改时间降序排序
-	for i := 0; i < len(fileInfos)-1; i++ {
-		for j := i + 1; j < len(fileInfos); j++ {
-			if fileInfos[i].ModTime.Before(fileInfos[j].ModTime) {
-				fileInfos[i], fileInfos[j] = fileInfos[j], fileInfos[i]
-			}
-		}
-	}
+	sort.Slice(fileInfos, func(i, j int) bool {
+		return fileInfos[i].ModTime.After(fileInfos[j].ModTime)
+	})
 
 	// 保留最新的5个，删除其余
 	if len(fileInfos) > 5 {

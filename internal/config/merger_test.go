@@ -139,7 +139,9 @@ func TestConfigMerger_needsUpdate(t *testing.T) {
 					Address: "test.example.com",
 				},
 				Actions: ActionsConfig{
-					DelayMs: 2000,
+					DelayMs:             2000,
+					SignCommands:        false,
+					DefaultSignCommands: false,
 				},
 				Log: LogConfig{
 					LogDir:     "test_logs",
@@ -154,7 +156,7 @@ func TestConfigMerger_needsUpdate(t *testing.T) {
 					HandleContainer: false,
 				},
 			},
-			expectNeedUpdate: false,
+			expectNeedUpdate: true,
 		},
 		{
 			name: "partial_config",

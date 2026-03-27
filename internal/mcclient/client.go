@@ -143,7 +143,9 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 
 	c.conn = packet.NewPacketConn(rawConn)
 	defer func() {
-		_ = c.conn.Close()
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
 	}()
 
 	if useOnline {
