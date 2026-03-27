@@ -52,12 +52,26 @@ actions:
     - "list"
   on_join_messages:         # 入服后自动发送的消息
     - "大家好"
+  sign_commands: false      # 是否签名命令
+  default_sign_commands: true
+
+commands:
+  enabled: false            # 启用机器人命令系统
+  prefix: "!"               # 命令前缀
+  allow_all: false          # 允许所有人使用
+  whitelist: []             # 允许使用的玩家列表
 
 log:
   log_dir: "logs"
-  max_size: 10              # 单个日志文件最大大小（MB）
+  max_size: 512             # 单个日志文件最大大小（KB）
   debug: false
   enable_file: true
+
+runtime:
+  headless: false           # 无界面模式
+
+packets:
+  handle_container: true    # 处理容器数据包
 ```
 
 ### 运行
@@ -70,11 +84,12 @@ log:
 
 ```
 cmd/gmcc/          # 程序入口
-internal/          # 核心模块
+internal/          # 核心模块（不导出）
   auth/            # 认证 (microsoft, minecraft)
-  commands/        # 命令系统 (core, handlers, tracker, auth)
-  components/      # 数据组件解析框架
-  config/          # 配置加载
+  commands/        # 命令系统
+    adapter/       # Bot 适配器
+    core/          # 命令核心（路由、解析、状态）
+  config/          # 配置加载、热重载、原子更新
   constants/       # 常量定义
   entity/          # 实体跟踪系统
   headless/        # 无头模式运行器
@@ -83,20 +98,23 @@ internal/          # 核心模块
     component/     # 物品组件解析器
   logx/            # 日志系统
   mcclient/        # Minecraft 客户端核心
-    chat/          # 聊天消息处理
-    crypto/        # 加密/解密
+    chat/          # 聊天消息处理、文本组件解析
+    crypto/        # 加密/解密 (CFB8)
     handlers/      # 数据包处理器
-    packet/        # 数据包定义
-    protocol/      # 协议定义
-  nbt/             # NBT 数据处理
-  player/          # 玩家状态
+    packet/        # 数据包定义、编解码
+    protocol/      # 协议常量
+  nbt/             # NBT 数据处理（解码、编码、路径查询）
+  player/          # 玩家状态（位置、背包、附近玩家）
   registry/        # 物品注册表 (Minecraft ID -> 物品信息)
   session/         # Token 缓存
   tui/             # 终端 UI
 pkg/               # 公共工具
-  binutil/         # 二进制工具
+  binutil/         # 二进制工具（VarInt、读写器）
   httpx/           # HTTP 工具
 docs/              # 文档
+  superpowers/     # 超级能力文档
+    specs/         # 规格说明
+    plans/         # 实现计划
 ```
 
 ## 文档

@@ -103,11 +103,11 @@ Handshake -> Login -> Configuration -> Play
 | `resource_pack_push` | 0x4F | 资源包推送 |
 | `action_bar` | 0x55 | 动作栏 |
 | `system_chat` | 0x77 | 系统聊天 |
-| `set_health` | 0x54 | 设置生命值 |
-| `set_experience` | 0x4D | 设置经验值 |
-| `player_info_update` | 0x42 | 玩家信息更新 |
-| `player_info_remove` | 0x3D | 玩家信息移除 |
-| `entity_data` | 0x5D | 实体数据 |
+| `update_health` | 0x66 | 设置生命值 |
+| `experience` | 0x65 | 设置经验值 |
+| `player_info_update` | 0x44 | 玩家信息更新 |
+| `player_info_remove` | 0x43 | 玩家信息移除 |
+| `entity_data` | 0x61 | 实体数据 |
 
 ### Play 阶段（客户端发送 - 主要）
 
@@ -123,13 +123,12 @@ Handshake -> Login -> Configuration -> Play
 | `cookie_response` | 0x14 | Cookie 响应 |
 | `keep_alive` | 0x1B | 心跳响应 |
 | `move_player_status_only` | 0x20 | 移动状态 |
+| `move_player_pos` | 0x21 | 玩家位置更新 |
+| `move_player_rot` | 0x22 | 玩家旋转更新 |
 | `pong` | 0x2C | Pong |
 | `resource_pack` | 0x30 | 资源包响应 |
-| `move_player_pos` | 0x16 | 玩家位置更新 |
-| `move_player_rot` | 0x17 | 玩家旋转更新 |
-| `move_player_pos_rot` | 0x18 | 玩家位置旋转更新 |
-| `container_close` | 0x0B | 关闭容器 |
-| `container_click` | 0x0C | 容器点击 |
+| `container_close` | 0x0D | 关闭容器 |
+| `container_click` | 0x0E | 容器点击 |
 
 ## 数据类型编解码
 

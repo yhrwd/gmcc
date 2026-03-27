@@ -37,7 +37,7 @@ optional:{
 }
 ```
 
-### 生命值和饥饿值 (0x54 play_client_set_health)
+### 生命值和饥饿值 (0x66 play_client_update_health)
 
 ```
 float32      health
@@ -45,7 +45,7 @@ int32        food
 float32      saturation
 ```
 
-### 经验值 (0x4D play_client_set_experience)
+### 经验值 (0x65 play_client_experience)
 
 ```
 float32      experience_bar
@@ -53,7 +53,7 @@ int32        level
 int32        total_experience
 ```
 
-### 游戏状态 (0x21 play_client_game_event)
+### 游戏状态 (0x26 play_client_game_event)
 
 ```
 int8         event_type
@@ -74,7 +74,7 @@ event_type:
   11 = ENABLE_RESPAWN_SCREEN
 ```
 
-### 玩家能力 (0x36 play_client_player_abilities)
+### 玩家能力 (0x3E play_client_player_abilities)
 
 ```
 int8          flags
@@ -114,9 +114,9 @@ int32        teleport_id
 
 客户端发送位置更新：
 
-- `move_player_pos` (0x16): 只有位置变化
-- `move_player_pos_rot` (0x18): 位置和角度变化
-- `move_player_rot` (0x17): 只有角度变化
+- `move_player_pos` (0x21): 只有位置变化
+- `move_player_pos_rot` (0x22): 位置和角度变化
+- `move_player_rot` (0x22): 只有角度变化
 - `move_player_status_only` (0x20): 仅用于 AFK 检测
 
 ### 坐标系统
@@ -225,7 +225,7 @@ minecraft:item_name
 
 ## 实体数据
 
-### 实体元数据 (0x5D play_client_entity_data)
+### 实体元数据 (0x61 play_client_entity_data)
 
 实体属性变化时发送：
 
@@ -285,7 +285,7 @@ entry:
 
 ## 玩家列表信息
 
-### 玩家信息更新 (0x42 play_client_player_info_update)
+### 玩家信息更新 (0x44 play_client_player_info_update)
 
 ```
 int8         action_bitset
@@ -319,7 +319,7 @@ player:
             nbt        display_name
 ```
 
-### 玩家信息移除 (0x3D play_client_player_info_remove)
+### 玩家信息移除 (0x43 play_client_player_info_remove)
 
 ```
 array        uuids  [16]byte[]
