@@ -15,6 +15,8 @@ type ActionsConfig struct {
 	OnJoinMessages []string `yaml:"on_join_messages"`
 	DelayMs        int      `yaml:"delay_ms"`
 	SignCommands   bool     `yaml:"sign_commands"`
+	// DefaultSignCommands 控制SendCommand方法默认是否使用签名
+	DefaultSignCommands bool `yaml:"default_sign_commands"`
 }
 
 type LogConfig struct {
@@ -52,10 +54,11 @@ func Default() Config {
 			Address: "127.0.0.1:25565",
 		},
 		Actions: ActionsConfig{
-			OnJoinCommands: nil,
-			OnJoinMessages: nil,
-			DelayMs:        1200,
-			SignCommands:   false,
+			OnJoinCommands:      nil,
+			OnJoinMessages:      nil,
+			DelayMs:             1200,
+			SignCommands:        false,
+			DefaultSignCommands: true, // 默认使用签名命令
 		},
 		Log: LogConfig{
 			LogDir:     "logs",

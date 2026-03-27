@@ -15,6 +15,11 @@ Go 语言实现的 Minecraft Java 版控制台客户端，支持协议版本 774
 - CESU-8 编码支持（正确显示中文和 Emoji）
 - NBT 数据解析与路径查询
 - **物品组件解析系统** - 支持 104 种数据组件类型
+- **实体跟踪系统** - 实时跟踪玩家和其他实体位置
+- **国际化系统** - 支持 Minecraft 语言数据本地化
+- **物品注册表** - Minecraft ID 到物品信息的映射
+- **无头模式运行器** - 支持自动化脚本
+- **命令系统** - 完整的命令框架，支持自定义命令
 - TUI 终端用户界面
 - 玩家状态和背包系统
 
@@ -67,17 +72,31 @@ log:
 cmd/gmcc/          # 程序入口
 internal/          # 核心模块
   auth/            # 认证 (microsoft, minecraft)
+  commands/        # 命令系统 (core, handlers, tracker, auth)
+  components/      # 数据组件解析框架
   config/          # 配置加载
-  item/            # 物品系统 (新增)
-    component/     # 组件解析框架
+  constants/       # 常量定义
+  entity/          # 实体跟踪系统
+  headless/        # 无头模式运行器
+  i18n/            # 国际化 (Minecraft 语言数据)
+  item/            # 物品系统
+    component/     # 物品组件解析器
   logx/            # 日志系统
-  mcclient/        # 客户端核心
+  mcclient/        # Minecraft 客户端核心
+    chat/          # 聊天消息处理
+    crypto/        # 加密/解密
+    handlers/      # 数据包处理器
+    packet/        # 数据包定义
+    protocol/      # 协议定义
   nbt/             # NBT 数据处理
   player/          # 玩家状态
-  session/         # 令牌缓存
+  registry/        # 物品注册表 (Minecraft ID -> 物品信息)
+  session/         # Token 缓存
   tui/             # 终端 UI
 pkg/               # 公共工具
-  binutil/         # 二进制工具 (新增)
+  binutil/         # 二进制工具
+  httpx/           # HTTP 工具
+docs/              # 文档
 ```
 
 ## 文档

@@ -258,8 +258,27 @@ func (t *TUI) processInput(line string) {
 	if strings.HasPrefix(line, "/") {
 		cmd := strings.TrimPrefix(line, "/")
 		if t.client.IsReady() {
-			if err := t.client.SendCommand(cmd); err != nil {
-				t.addLog(fmt.Sprintf("\x1b[31m[错误] %v\x1b[0m", err))
+			// 检查是否是强制使用签名或无签名的前缀
+			if strings.HasPrefix(cmd, "!") {
+				// 强制使用无签名命令
+				cmd = strings.TrimPrefix(cmd, "!")
+				if err := t.client.SendCommandUnsigned(cmd); err != nil {
+					t.addLog(fmt.Sprintf("\x1b[31m[错误] %v\x1b[0m", err))
+				} else {
+					t.addLog(fmt.Sprintf("\x1b[90m[命令] /%s (无签名)\x1b[0m", cmd))
+				}
+			} else {
+				// 使用默认签名行为
+				signed := t.cfg.Actions.DefaultSignCommands
+				if err := t.client.SendCommand(cmd); err != nil {
+					t.addLog(fmt.Sprintf("\x1b[31m[错误] %v\x1b[0m", err))
+				} else {
+					if signed {
+						t.addLog(fmt.Sprintf("\x1b[90m[命令] /%s (签名)\x1b[0m", cmd))
+					} else {
+						t.addLog(fmt.Sprintf("\x1b[90m[命令] /%s (无签名)\x1b[0m", cmd))
+					}
+				}
 			}
 		} else {
 			t.addLog("\x1b[33m[提示] 尚未连接\x1b[0m")

@@ -65,13 +65,24 @@ func (c *Client) SendCommand(command string) error {
 
 	logx.Debugf("发送命令原始内容: %q", cmd)
 
-	if err := c.sendUnsignedCommand(cmd); err != nil {
-		return fmt.Errorf("发送命令失败: %w", err)
+	// 根据配置决定是否默认使用签名
+	if c.cfg.Actions.DefaultSignCommands {
+		if err := c.sendSignedCommand(cmd); err != nil {
+			logx.Debugf("签名命令失败，尝试无签名: %v", err)
+			if err2 := c.sendUnsignedCommand(cmd); err2 != nil {
+				return fmt.Errorf("发送命令失败: %w", err2)
+			}
+		}
+	} else {
+		if err := c.sendUnsignedCommand(cmd); err != nil {
+			return fmt.Errorf("发送命令失败: %w", err)
+		}
 	}
 	logx.Debugf("已发送命令: /%s", cmd)
 	return nil
 }
 
+// SendCommandSigned 强制发送签名命令，失败后降级为无签名
 func (c *Client) SendCommandSigned(command string) error {
 	cmd := strings.TrimSpace(command)
 	cmd = strings.TrimPrefix(cmd, "/")
@@ -89,6 +100,24 @@ func (c *Client) SendCommandSigned(command string) error {
 		}
 	}
 	logx.Debugf("已发送命令: /%s", cmd)
+	return nil
+}
+
+// SendCommandUnsigned 强制发送无签名命令
+func (c *Client) SendCommandUnsigned(command string) error {
+	cmd := strings.TrimSpace(command)
+	cmd = strings.TrimPrefix(cmd, "/")
+	if cmd == "" {
+		return fmt.Errorf("command 不能为空")
+	}
+	if c.state != protocol.StatePlay {
+		return fmt.Errorf("当前状态不是 Play，无法发送命令")
+	}
+
+	if err := c.sendUnsignedCommand(cmd); err != nil {
+		return fmt.Errorf("发送命令失败: %w", err)
+	}
+	logx.Debugf("已发送无签名命令: /%s", cmd)
 	return nil
 }
 

@@ -74,12 +74,28 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-// SendCommand 发送命令
+// SendCommand 发送命令（使用配置的默认签名行为）
 func (r *Runner) SendCommand(cmd string) error {
 	if r.client == nil || !r.client.IsReady() {
 		return fmt.Errorf("客户端未就绪")
 	}
 	return r.client.SendCommand(cmd)
+}
+
+// SendCommandSigned 发送签名命令
+func (r *Runner) SendCommandSigned(cmd string) error {
+	if r.client == nil || !r.client.IsReady() {
+		return fmt.Errorf("客户端未就绪")
+	}
+	return r.client.SendCommandSigned(cmd)
+}
+
+// SendCommandUnsigned 发送无签名命令
+func (r *Runner) SendCommandUnsigned(cmd string) error {
+	if r.client == nil || !r.client.IsReady() {
+		return fmt.Errorf("客户端未就绪")
+	}
+	return r.client.SendCommandUnsigned(cmd)
 }
 
 // SendMessage 发送消息

@@ -139,23 +139,44 @@ for _, tt := range tests {
 ### Project Structure
 
 ```
-cmd/gmcc/          # Entry point
-internal/          # Core modules (not exported)
-  auth/            # Authentication (microsoft, minecraft)
-  config/          # Configuration loading
-  logx/            # Logging
-  mcclient/        # Minecraft client core
-  nbt/             # NBT data handling
-  player/          # Player state
-  session/         # Token caching
-  tui/             # Terminal UI
-pkg/               # Public utilities
-docs/              # Documentation
+cmd/gmcc/          # 程序入口
+internal/          # 核心模块（不导出）
+  auth/            # 认证 (microsoft, minecraft)
+  commands/        # 命令系统 (core, handlers, tracker, auth)
+  components/      # 数据组件解析框架
+  config/          # 配置加载
+  constants/       # 常量定义
+  entity/          # 实体跟踪系统
+  headless/        # 无头模式运行器
+  i18n/            # 国际化 (Minecraft 语言数据)
+  item/            # 物品系统
+    component/     # 物品组件解析器
+  logx/            # 日志系统
+  mcclient/        # Minecraft 客户端核心
+    chat/          # 聊天消息处理
+    crypto/        # 加密/解密
+    handlers/      # 数据包处理器
+    packet/        # 数据包定义
+    protocol/      # 协议定义
+  nbt/             # NBT 数据处理
+  player/          # 玩家状态
+  registry/        # 物品注册表 (Minecraft ID -> 物品信息)
+  session/         # Token 缓存
+  tui/             # 终端 UI
+pkg/               # 公共工具
+  binutil/         # 二进制工具
+  httpx/           # HTTP 工具
+docs/              # 文档
 ```
 
 ### Key Conventions
 
-- Protocol constants in `internal/mcclient/protocol_774.go`
+- Protocol constants in `internal/mcclient/protocol/` directory
 - Use NBT path queries via `nbt.QueryPath()` for player data
 - Chat message handling via `client.SetChatHandler()`
+- Entity tracking via `entity.Tracker`
+- Item registry via `registry.GetItemRegistry()`
+- Internationalization via `i18n.GetI18n()`
 - Token caching in `.session/` directory
+- Item component parsing via `item/component` package
+- Command system in `internal/commands/` package

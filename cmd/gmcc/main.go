@@ -21,7 +21,12 @@ func main() {
 		configPath = v
 	}
 
-	cfg, err := config.Load(configPath)
+	// 默认启用配置自动更新
+	// 可以通过环境变量 GMCC_DISABLE_AUTO_UPDATE=true 禁用
+	disableAutoUpdate := os.Getenv("GMCC_DISABLE_AUTO_UPDATE") == "true"
+	autoUpdate := !disableAutoUpdate
+
+	cfg, err := config.LoadWithAutoUpdate(configPath, autoUpdate)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[错误] 配置加载失败: %v\n", err)
 		os.Exit(1)
