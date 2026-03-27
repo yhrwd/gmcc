@@ -72,13 +72,16 @@ func (c *Client) SendCommand(command string) error {
 			if err2 := c.sendUnsignedCommand(cmd); err2 != nil {
 				return fmt.Errorf("发送命令失败: %w", err2)
 			}
+			logx.Debugf("已发送无签名命令: /%s", cmd)
+		} else {
+			logx.Debugf("已发送命令: /%s", cmd)
 		}
 	} else {
 		if err := c.sendUnsignedCommand(cmd); err != nil {
 			return fmt.Errorf("发送命令失败: %w", err)
 		}
+		logx.Debugf("已发送无签名命令: /%s", cmd)
 	}
-	logx.Debugf("已发送命令: /%s", cmd)
 	return nil
 }
 
@@ -98,8 +101,10 @@ func (c *Client) SendCommandSigned(command string) error {
 		if err2 := c.sendUnsignedCommand(cmd); err2 != nil {
 			return fmt.Errorf("发送命令失败: %w", err2)
 		}
+		logx.Debugf("已发送无签名命令: /%s", cmd)
+	} else {
+		logx.Debugf("已发送命令: /%s", cmd)
 	}
-	logx.Debugf("已发送命令: /%s", cmd)
 	return nil
 }
 

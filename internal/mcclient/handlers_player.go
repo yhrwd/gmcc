@@ -15,19 +15,19 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 
 	var health float32
 	if err := binary.Read(r, binary.BigEndian, &health); err != nil {
-		logx.PacketError("set_health", data, err)
+		logx.PacketErrorWithContext("set_health", data, err, "")
 		return nil
 	}
 
 	food, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		logx.PacketError("set_health", data, fmt.Errorf("读取 food 失败: %w", err))
+		logx.PacketErrorWithContext("set_health", data, err, "读取 food 失败")
 		return nil
 	}
 
 	var saturation float32
 	if err := binary.Read(r, binary.BigEndian, &saturation); err != nil {
-		logx.PacketError("set_health", data, fmt.Errorf("读取 saturation 失败: %w", err))
+		logx.PacketErrorWithContext("set_health", data, err, "读取 saturation 失败")
 		return nil
 	}
 
@@ -38,23 +38,23 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 func (c *Client) handleSetExperiencePacket(data []byte) error {
 	r := bytes.NewReader(data)
 	if r.Len() < 6 {
-		logx.PacketError("set_experience", data, fmt.Errorf("数据过短: %d bytes (需要至少6)", r.Len()))
+		logx.PacketErrorWithContext("set_experience", data, fmt.Errorf("数据过短: %d bytes (需要至少6)", r.Len()), "")
 		return nil
 	}
 
 	var expBar float32
 	if err := binary.Read(r, binary.BigEndian, &expBar); err != nil {
-		logx.PacketError("set_experience", data, err)
+		logx.PacketErrorWithContext("set_experience", data, err, "")
 		return nil
 	}
 	level, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		logx.PacketError("set_experience", data, fmt.Errorf("读取 level 失败: %w", err))
+		logx.PacketErrorWithContext("set_experience", data, err, "读取 level 失败")
 		return nil
 	}
 	totalExp, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
-		logx.PacketError("set_experience", data, fmt.Errorf("读取 totalExp 失败: %w", err))
+		logx.PacketErrorWithContext("set_experience", data, err, "读取 totalExp 失败")
 		return nil
 	}
 

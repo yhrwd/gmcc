@@ -162,7 +162,7 @@ func (c *Client) handleContainerContentPacket(data []byte) error {
 
 	carriedItem, err := packet.ReadSlotData(r)
 	if err != nil {
-		logx.PacketError("container_content", data, fmt.Errorf("carriedItem: %w", err))
+		logx.PacketErrorWithContext("container_content", data, err, "carriedItem")
 		return nil
 	}
 	var carried *player.SlotData

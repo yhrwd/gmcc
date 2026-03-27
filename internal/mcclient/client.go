@@ -215,7 +215,7 @@ func (c *Client) prepareOnlineSession() error {
 			cache.Minecraft.ProfileID,
 			cache.Minecraft.ProfileName,
 		); err == nil {
-			logx.Infof("使用缓存的 Minecraft token: %s (%s)", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
+			logx.LogTokenCache("minecraft", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
 			return nil
 		}
 		logx.Warnf("检测 detections 缓存的 Minecraft token 数据损坏，准备重新认证")
@@ -266,10 +266,10 @@ func (c *Client) resolveXSTSToken(cache *session.TokenCache, now time.Time) (*mi
 	if cache != nil && cache.HasValidMicrosoftAccess(now) {
 		xstsResp, err := microsoft.GetXSTSTokenFromAccessToken(cache.Microsoft.AccessToken)
 		if err == nil {
-			logx.Infof("使用缓存的 Microsoft access_token")
+			logx.LogTokenCache("microsoft", "", "")
 			return xstsResp, nil, nil
 		}
-		logx.Warnf("缓存 Microsoft access_token 已失效，将尝试 refresh_token: %v", err)
+		logx.LogTokenExpired("microsoft", err)
 	}
 
 	if cache != nil && cache.HasMicrosoftRefreshToken() {
