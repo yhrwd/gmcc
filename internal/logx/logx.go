@@ -69,6 +69,46 @@ func Errorf(format string, args ...interface{}) {
 	}
 }
 
+// LogTokenCache 记录token缓存状态
+func LogTokenCache(tokenType string, profileName string, profileID string) {
+	mu.Lock()
+	defer mu.Unlock()
+	template := "[INFO] 使用缓存的 %s token"
+	args := []interface{}{tokenType}
+
+	if profileName != "" || profileID != "" {
+		template += ": %s (%s)"
+		args = append(args, profileName, profileID)
+	}
+
+	now := time.Now().Format("15:04:05")
+	consoleLogger.Printf("%s "+template, append([]interface{}{now}, args...)...)
+	if fileLogger != nil {
+		fileLogger.Printf(template, args...)
+	}
+}
+
+// LogTokenExpired 记录token过期状态
+func LogTokenExpired(tokenType string, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	now := time.Now().Format("15:04:05")
+	if err != nil {
+		template := "缓存 %s token 已失效，将尝试 refresh_token: %v"
+		consoleLogger.Printf("%s [WARN] "+template, now, tokenType, err)
+		if fileLogger != nil {
+			fileLogger.Printf("[WARN] "+template, tokenType, err)
+		}
+	} else {
+		template := "缓存 %s token 已失效"
+		consoleLogger.Printf("%s [WARN] "+template, now, tokenType)
+		if fileLogger != nil {
+			fileLogger.Printf("[WARN] "+template, tokenType)
+		}
+	}
+}
+
 func Debugf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -104,6 +144,37 @@ func PacketError(packetName string, data []byte, err error) {
 		consoleLogger.Printf("%s [ERROR] Packet解析失败: %s: %v, len=%d", now.Format("15:04:05"), packetName, err, len(data))
 		fileLogger.Printf("[ERROR] Packet解析失败: %s: %v, len=%d", packetName, err, len(data))
 	}
+	if len(data) > 0 {
+		savePacketDump(packetName, data, err)
+	}
+}
+
+// PacketErrorWithContext 记录带有上下文信息的数据包错误
+func PacketErrorWithContext(packetName string, data []byte, err error, context string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	var errMsg string
+	if context != "" {
+		if err != nil {
+			errMsg = fmt.Sprintf("%s: %v", context, err)
+		} else {
+			errMsg = context
+		}
+	} else {
+		if err != nil {
+			errMsg = err.Error()
+		} else {
+			errMsg = "未知错误"
+		}
+	}
+
+	now := time.Now()
+	consoleLogger.Printf("%s [ERROR] Packet解析失败: %s: %v, len=%d", now.Format("15:04:05"), packetName, errMsg, len(data))
+	if fileLogger != nil {
+		fileLogger.Printf("[ERROR] Packet解析失败: %s: %v, len=%d", packetName, errMsg, len(data))
+	}
+
 	if len(data) > 0 {
 		savePacketDump(packetName, data, err)
 	}
