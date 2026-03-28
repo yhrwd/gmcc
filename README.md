@@ -89,6 +89,11 @@ internal/          # 核心模块（不导出）
   commands/        # 命令系统
     adapter/       # Bot 适配器
     core/          # 命令核心（路由、解析、状态）
+    handlers/      # 命令处理器
+    tracker/       # 命令状态跟踪
+    auth/          # 权限管理
+    modules/       # 命令模块
+    parser/        # 消息解析器
   config/          # 配置加载、热重载、原子更新
   constants/       # 常量定义
   entity/          # 实体跟踪系统
@@ -112,9 +117,11 @@ pkg/               # 公共工具
   binutil/         # 二进制工具（VarInt、读写器）
   httpx/           # HTTP 工具
 docs/              # 文档
-  superpowers/     # 超级能力文档
+  formats/         # 数据格式参考 (NBT, SNBT, 文本组件)
+  superpowers/     # 设计文档
     specs/         # 规格说明
-    plans/         # 实现计划
+    plans/          # 实现计划
+      archive/      # 已完成的计划存档
 ```
 
 ## 文档

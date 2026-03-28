@@ -4,7 +4,7 @@ This file provides guidelines for agentic coding agents working on the gmcc proj
 
 ## Project Overview
 
-gmcc is a Minecraft Java Edition console client supporting protocol version 774 (1.21.11). Written in Go 1.25.1.
+gmcc is a Minecraft Java Edition console client supporting protocol version 774 (1.21.11). Written in Go.
 
 ## Build Commands
 
@@ -167,6 +167,11 @@ pkg/               # 公共工具
   binutil/         # 二进制工具
   httpx/           # HTTP 工具
 docs/              # 文档
+  formats/         # 数据格式参考 (NBT, SNBT, 文本组件)
+  superpowers/     # 设计文档
+    specs/         # 规格说明
+    plans/          # 实现计划
+      archive/      # 已完成的计划存档
 ```
 
 ### Key Conventions
@@ -179,4 +184,15 @@ docs/              # 文档
 - Internationalization via `i18n.GetI18n()`
 - Token caching in `.session/` directory
 - Item component parsing via `item/component` package
-- Command system in `internal/commands/` package
+- Command system in `internal/commands/` package (see `docs/command-development.md`)
+
+## Documentation Structure
+
+Documentation follows the [Diátaxis framework](https://diataxis.fr/):
+
+- **Tutorials**: Step-by-step guides for beginners
+- **How-to Guides**: Solutions to specific problems
+- **Reference**: Technical specifications and API docs
+- **Explanation**: Architecture and design decisions
+
+See `docs/README.md` for the complete documentation index.
