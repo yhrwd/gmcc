@@ -2,6 +2,7 @@ package mcclient
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -365,4 +366,76 @@ func (c *Client) handlePacket(pkt packet.Packet) error {
 	default:
 		return fmt.Errorf("未知连接状态: %s", c.state.String())
 	}
+}
+
+func (c *Client) SendPlayerRotation(yaw, pitch float32, onGround bool) error {
+	if c.state != protocol.StatePlay {
+		return fmt.Errorf("当前状态不是 Play，无法发送视角数据包")
+	}
+	if c.conn == nil {
+		return fmt.Errorf("连接未初始化")
+	}
+
+	payload := make([]byte, 0, 9)
+	payload = append(payload, packet.EncodeFloat32(yaw)...)
+	payload = append(payload, packet.EncodeFloat32(pitch)...)
+	payload = append(payload, packet.EncodeBool(onGround)...)
+
+	return c.conn.WritePacket(protocol.PlayServerMovePlayerRot, payload)
+}
+
+// SendSetCarriedItem 切换快捷栏槽位 (0-8 对应快捷栏 1-9)
+// 注: 包ID需要根据实际协议版本确认，目前代码暂未连接实际服务器
+func (c *Client) SendSetCarriedItem(slot int16) error {
+	if c.state != protocol.StatePlay {
+		return fmt.Errorf("当前状态不是 Play，无法发送快捷栏数据包")
+	}
+	if c.conn == nil {
+		return fmt.Errorf("连接未初始化")
+	}
+	if slot < 0 || slot > 8 {
+		return fmt.Errorf("slot 必须在 0-8 范围内")
+	}
+
+	// Set Carried Item: slot (Short)
+	// 使用 big-endian 编码
+	payload := make([]byte, 0, 2)
+	buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(buf, uint16(slot))
+	payload = append(payload, buf...)
+
+	return c.conn.WritePacket(protocol.PlayServerSetCarriedItem, payload)
+}
+
+// SendInteract 发送实体交互包 (右键点击实体)
+// entityID: 目标实体ID
+// action: InteractActionInteract (0), InteractActionAttack (1), InteractActionInteractAt (2)
+// hand: HandMainHand (0), HandOffHand (1)
+// sneaking: 是否潜行
+func (c *Client) SendInteract(entityID int32, action int32, hand int32, sneaking bool) error {
+	if c.state != protocol.StatePlay {
+		return fmt.Errorf("当前状态不是 Play，无法发送交互数据包")
+	}
+	if c.conn == nil {
+		return fmt.Errorf("连接未初始化")
+	}
+
+	payload := make([]byte, 0, 16)
+	payload = append(payload, packet.EncodeVarInt(entityID)...)
+	payload = append(payload, packet.EncodeVarInt(action)...)
+
+	// Interact (action=0) 和 InteractAt (action=2) 需要发送 hand
+	if action == protocol.InteractActionInteract || action == protocol.InteractActionInteractAt {
+		// 对于 InteractAt，还需要发送目标位置
+		if action == protocol.InteractActionInteractAt {
+			// INTERACT_AT 需要额外的 targetX/y/z (float32)
+			// 我们使用简化的 INTERACT (action=0) 进行右键交互
+			return fmt.Errorf("暂不支持 INTERACT_AT，请使用 INTERACT")
+		}
+		payload = append(payload, packet.EncodeVarInt(hand)...)
+	}
+
+	payload = append(payload, packet.EncodeBool(sneaking)...)
+
+	return c.conn.WritePacket(protocol.PlayServerInteract, payload)
 }

@@ -1387,6 +1387,12 @@ import (
 
 ---
 
+---
+
 文档版本：v1.0  
 最后更新：2024-01-15  
 作者：GMCC Dev Team
+
+---
+
+> **开发指南**：命令开发详细教程请参考 [`docs/command-development.md`](./command-development.md)

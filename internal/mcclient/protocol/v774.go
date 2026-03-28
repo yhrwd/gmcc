@@ -95,8 +95,25 @@ const (
 	PlayServerCookieResp      int32 = 0x14
 	PlayServerKeepAlive       int32 = 0x1B
 	PlayServerMoveStatus      int32 = 0x20
+	PlayServerMovePlayerPos   int32 = 0x21 // move_player_pos
+	PlayServerMovePlayerRot   int32 = 0x22 // move_player_rot
 	PlayServerPong            int32 = 0x2C
 	PlayServerResource        int32 = 0x30
+	PlayServerInteract        int32 = 0x19 // 0x19 (25) - interact - 右键点击实体
+	PlayServerSetCarriedItem  int32 = 0x34 // 0x34 (52) - set_carried_item - 切换快捷栏
+)
+
+// Interact action types
+const (
+	InteractActionInteract   int32 = 0 // 右键点击实体 (无需目标位置)
+	InteractActionAttack     int32 = 1 // 攻击实体
+	InteractActionInteractAt int32 = 2 // 在特定位置交互 (需要目标坐标)
+)
+
+// Hand types
+const (
+	HandMainHand int32 = 0 // 主手
+	HandOffHand  int32 = 1 // 副手
 )
 
 const (

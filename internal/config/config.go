@@ -11,12 +11,18 @@ type ServerConfig struct {
 }
 
 type ActionsConfig struct {
-	OnJoinCommands []string `yaml:"on_join_commands"`
-	OnJoinMessages []string `yaml:"on_join_messages"`
-	DelayMs        int      `yaml:"delay_ms"`
-	SignCommands   bool     `yaml:"sign_commands"`
-	// DefaultSignCommands 控制SendCommand方法默认是否使用签名
-	DefaultSignCommands bool `yaml:"default_sign_commands"`
+	OnJoinCommands      []string `yaml:"on_join_commands"`
+	OnJoinMessages      []string `yaml:"on_join_messages"`
+	DelayMs             int      `yaml:"delay_ms"`
+	SignCommands        bool     `yaml:"sign_commands"`
+	DefaultSignCommands bool     `yaml:"default_sign_commands"`
+}
+
+type CommandsConfig struct {
+	Enabled   bool     `yaml:"enabled"`
+	Prefix    string   `yaml:"prefix"`
+	AllowAll  bool     `yaml:"allow_all"`
+	Whitelist []string `yaml:"whitelist"`
 }
 
 type LogConfig struct {
@@ -27,20 +33,21 @@ type LogConfig struct {
 }
 
 type RuntimeConfig struct {
-	Headless bool `yaml:"headless"` // 无界面模式，只记录日志
+	Headless bool `yaml:"headless"`
 }
 
 type PacketConfig struct {
-	HandleContainer bool `yaml:"handle_container"` // 是否处理背包数据包
+	HandleContainer bool `yaml:"handle_container"`
 }
 
 type Config struct {
-	Account AccountConfig `yaml:"account"`
-	Server  ServerConfig  `yaml:"server"`
-	Actions ActionsConfig `yaml:"actions"`
-	Log     LogConfig     `yaml:"log"`
-	Runtime RuntimeConfig `yaml:"runtime"`
-	Packets PacketConfig  `yaml:"packets"`
+	Account  AccountConfig  `yaml:"account"`
+	Server   ServerConfig   `yaml:"server"`
+	Actions  ActionsConfig  `yaml:"actions"`
+	Commands CommandsConfig `yaml:"commands"`
+	Log      LogConfig      `yaml:"log"`
+	Runtime  RuntimeConfig  `yaml:"runtime"`
+	Packets  PacketConfig   `yaml:"packets"`
 }
 
 // Default 返回默认配置模板。
@@ -58,11 +65,17 @@ func Default() Config {
 			OnJoinMessages:      nil,
 			DelayMs:             1200,
 			SignCommands:        false,
-			DefaultSignCommands: true, // 默认使用签名命令
+			DefaultSignCommands: true,
+		},
+		Commands: CommandsConfig{
+			Enabled:   false,
+			Prefix:    "!",
+			AllowAll:  false,
+			Whitelist: nil,
 		},
 		Log: LogConfig{
 			LogDir:     "logs",
-			MaxSize:    512, // 单位：KB，转换为字节时 *1024
+			MaxSize:    512,
 			Debug:      false,
 			EnableFile: true,
 		},

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -310,4 +311,18 @@ func ReadUUID(r io.Reader) ([16]byte, error) {
 func DiscardN(r io.Reader, n int) error {
 	_, err := io.CopyN(io.Discard, r, int64(n))
 	return err
+}
+
+func ReadFloat32(r io.Reader) (float32, error) {
+	var v float32
+	if err := binary.Read(r, binary.BigEndian, &v); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+func EncodeFloat32(v float32) []byte {
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], math.Float32bits(v))
+	return b[:]
 }
