@@ -186,6 +186,20 @@ func ReadSlotData(r *bytes.Reader) (*SlotData, error) {
 	return &SlotData{ID: itemID, Count: count}, nil
 }
 
+func skipSlotData(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	return skipSlotComponents(r)
+}
+
 // skipSlotComponents 跳过物品组件 (内部使用，简化版)
 func skipSlotComponents(r *bytes.Reader) error {
 	// 添加的组件数量
@@ -202,26 +216,12 @@ func skipSlotComponents(r *bytes.Reader) error {
 
 	// 跳过添加的组件
 	for i := int32(0); i < numAdd; i++ {
-		// 读取 component_type
 		componentType, err := ReadVarIntFromReader(r)
 		if err != nil {
-			// 如果读取组件类型失败，可能是数据损坏，尝试跳过剩余部分
-			logx.Debugf("Failed to read component type at index %d: %v, remaining bytes: %d", i, err, r.Len())
-			// 尝试通过 NBT 跳过剩余部分
-			if skipErr := SkipNBT(r); skipErr != nil {
-				// 如果 NBT 也失败，跳过所有剩余字节
-				logx.Debugf("SkipNBT also failed: %v, skipping all remaining bytes", skipErr)
-				if r.Len() > 0 {
-					_, _ = r.Seek(int64(r.Len()), 1)
-				}
-			}
 			return fmt.Errorf("read component type at index %d: %w", i, err)
 		}
-		// 根据类型跳过数据
 		if err := skipComponentByType(r, componentType); err != nil {
-			logx.Debugf("Failed to skip component type %d at index %d: %v", componentType, i, err)
-			// 如果跳过失败，尝试跳到下一个组件
-			continue
+			return fmt.Errorf("skip component type %d at index %d: %w", componentType, i, err)
 		}
 	}
 
@@ -236,173 +236,1065 @@ func skipSlotComponents(r *bytes.Reader) error {
 
 // skipComponentByType 根据组件类型跳过数据 (参考 1.21.11 数据组件规范)
 func skipComponentByType(r *bytes.Reader, componentType int32) error {
-	// VarInt 类型 (基础数字、稀有度、附魔能力等)
-	varIntTypes := map[int32]bool{
-		1:   true, // max_stack_size
-		2:   true, // max_damage
-		3:   true, // damage
-		7:   true, // minimum_attack_charge
-		12:  true, // rarity
-		19:  true, // repair_cost
-		20:  true, // creative_slot_lock
-		31:  true, // enchantable
-		44:  true, // map_id
-		46:  true, // map_post_processing
-		47:  true, // potion_duration_scale
-		61:  true, // ominous_bottle_amplifier
-		91:  true, // bundle_remaining_space
-		102: true, // base_color_component
-		103: true, // color_component
-		54:  true, // trimming_material (VarInt for material ID)
-		73:  true, // container (size VarInt)
-	}
-
-	if varIntTypes[componentType] {
+	switch componentType {
+	case 0, 6, 9, 45, 55, 57, 64, 76, 77:
+		return SkipNBT(r)
+	case 1, 2, 3, 12, 19, 31, 44, 46, 61, 71, 79, 80, 81, 82, 83, 85, 86, 87, 88, 89, 90, 91, 92, 93, 95, 98, 99, 100, 101, 102, 103:
 		_, err := ReadVarIntFromReader(r)
 		return err
-	}
-
-	// Int32 类型 (颜色、定制模型数据等)
-	int32Types := map[int32]bool{
-		17:  true, // custom_model_data
-		42:  true, // dyed_color
-		43:  true, // map_color
-		71:  true, // base_color
-		100: true, // frame_type
-	}
-
-	if int32Types[componentType] {
-		_, err := ReadInt32FromReader(r)
+	case 4, 20, 22, 34:
+		return nil
+	case 5:
+		return skipUseEffects(r)
+	case 7:
+		_, err := ReadFloat32FromReader(r)
 		return err
-	}
-
-	// Bool 类型 (无数据、附魔光效等)
-	boolTypes := map[int32]bool{
-		4:  true, // unbreakable
-		21: true, // enchantment_glint_override
-		34: true, // glider
-		36: true, // death_protection
-	}
-
-	if boolTypes[componentType] {
+	case 10, 27, 35, 63, 69:
+		_, err := ReadStringFromReader(r)
+		return err
+	case 11:
+		return skipNBTList(r)
+	case 13, 41:
+		return skipEnchantmentList(r)
+	case 14, 15:
+		return skipItemBlockPredicates(r)
+	case 16:
+		return skipAttributeModifiers(r)
+	case 17:
+		return skipCustomModelData(r)
+	case 18:
+		return skipTooltipDisplay(r)
+	case 21:
 		_, err := ReadBoolFromReader(r)
 		return err
-	}
-
-	// NBT 类型 (文本组件、复杂结构等)
-	nbtTypes := map[int32]bool{
-		0:   true, // custom_data
-		6:   true, // custom_name
-		9:   true, // item_name
-		11:  true, // lore
-		13:  true, // enchantments
-		22:  true, // intangible_projectile
-		23:  true, // food
-		24:  true, // consumable
-		25:  true, // use_remainder
-		26:  true, // use_cooldown
-		27:  true, // damage_resistant
-		28:  true, // tool
-		29:  true, // weapon
-		30:  true, // attack_range
-		32:  true, // equippable
-		33:  true, // repairable
-		35:  true, // tooltip_style
-		37:  true, // blocks_attacks
-		38:  true, // piercing_weapon
-		39:  true, // kinetic_weapon
-		40:  true, // swing_animation
-		41:  true, // stored_enchantments
-		45:  true, // map_decorations
-		50:  true, // potion_contents
-		51:  true, // suspicious_stew_effects
-		52:  true, // writable_book_content
-		53:  true, // written_book_content
-		55:  true, // debug_stick_state
-		56:  true, // entity_data
-		57:  true, // bucket_entity_data
-		58:  true, // block_entity_data
-		59:  true, // instrument
-		60:  true, // provides_trim_material
-		62:  true, // jukebox_playable
-		63:  true, // provides_banner_patterns
-		64:  true, // recipes
-		65:  true, // lodestone_tracker
-		66:  true, // firework_explosion
-		67:  true, // fireworks
-		68:  true, // profile
-		69:  true, // note_block_sound
-		70:  true, // banner_patterns
-		75:  true, // bees
-		76:  true, // lock
-		77:  true, // container_loot
-		78:  true, // break_sound
-		79:  true, // villager_variant
-		80:  true, // wolf_variant
-		81:  true, // cat_variant
-		82:  true, // axolotl_variant
-		83:  true, // frog_variant
-		84:  true, // painting_variant
-		85:  true, // shulker_variant
-		86:  true, // goat_variant
-		87:  true, // sniffer_variant
-		88:  true, // ghoul_variant
-		89:  true, // breeze_variant
-		90:  true, // bogged_variant
-		93:  true, // buckable
-		94:  true, // armor_trim
-		95:  true, // equippable_color
-		96:  true, // trim_material
-		97:  true, // trim_pattern
-		98:  true, // compass_color
-		99:  true, // map_display_color
-		101: true, // banner_pattern
-	}
-
-	if nbtTypes[componentType] {
-		return SkipNBT(r)
-	}
-
-	// 容器组件 (ID 73) 特殊处理
-	if componentType == 73 {
-		return skipContainerComponentData(r)
-	}
-
-	// 其他未知组件，尝试作为 NBT 跳过
-	if err := SkipNBT(r); err != nil {
-		logx.Debugf("SkipNBT failed for component type %d: %v", componentType, err)
-		if r.Len() > 0 {
-			logx.Debugf("Component type %d: attempting to skip remaining %d bytes", componentType, r.Len())
-			// 作为最后手段，尝试跳过剩余字节
-			_, err := r.Seek(int64(r.Len()), 1)
+	case 23:
+		return skipFoodComponent(r)
+	case 24, 36:
+		return skipConsumeEffectsComponent(r)
+	case 25:
+		return skipSlotData(r)
+	case 26:
+		return skipUseCooldown(r)
+	case 28:
+		return skipToolComponent(r)
+	case 29:
+		if _, err := ReadVarIntFromReader(r); err != nil {
 			return err
 		}
+		_, err := ReadFloat32FromReader(r)
 		return err
+	case 30:
+		return skipFloat32Values(r, 6)
+	case 32:
+		return skipEquippableComponent(r)
+	case 33:
+		return skipIDSetApprox(r)
+	case 37:
+		return skipBlocksAttacksComponent(r)
+	case 38:
+		return skipPiercingWeaponComponent(r)
+	case 39:
+		return skipKineticWeaponComponent(r)
+	case 40:
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		_, err := ReadVarIntFromReader(r)
+		return err
+	case 42, 43:
+		_, err := ReadInt32FromReader(r)
+		return err
+	case 47:
+		_, err := ReadFloat32FromReader(r)
+		return err
+	case 48, 49, 73:
+		return skipSlotList(r)
+	case 50:
+		return skipPotionContents(r)
+	case 51:
+		return skipSuspiciousStewEffects(r)
+	case 52:
+		return skipWritableBookContent(r)
+	case 53:
+		return skipWrittenBookContent(r)
+	case 54:
+		return skipTrimComponentApprox(r)
+	case 56, 58:
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		return SkipNBT(r)
+	case 59:
+		return skipHolderOrStringApprox(r)
+	case 60:
+		return skipHolderOrStringApprox(r)
+	case 62:
+		return skipHolderOrStringApprox(r)
+	case 65:
+		return skipLodestoneTracker(r)
+	case 66:
+		return skipFireworkExplosion(r)
+	case 67:
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		count, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return err
+		}
+		for i := int32(0); i < count; i++ {
+			if err := skipFireworkExplosion(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	case 68:
+		return skipResolvableProfile(r)
+	case 70:
+		count, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return err
+		}
+		for i := int32(0); i < count; i++ {
+			if err := skipBannerPatternLayerApprox(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	case 75:
+		return skipBeesComponent(r)
+	case 78:
+		return skipSoundHolderApprox(r)
+	case 84:
+		return skipRegistryEntryHolderApprox(r)
+	case 94:
+		return skipTrimComponentApprox(r)
+	case 96, 97:
+		return skipRegistryEntryHolderApprox(r)
+	default:
+		return SkipNBT(r)
 	}
-	return nil
 }
 
 // skipContainerComponentData 跳过容器组件数据
 func skipContainerComponentData(r *bytes.Reader) error {
-	// 读取容器大小(忽略，仅用于验证)
-	_, err := ReadVarIntFromReader(r)
-	if err != nil {
+	return skipSlotList(r)
+}
+
+func skipUseEffects(r *bytes.Reader) error {
+	if _, err := ReadBoolFromReader(r); err != nil {
 		return err
 	}
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	_, err := ReadFloat32FromReader(r)
+	return err
+}
 
-	// 读取内容数量
+func skipNBTList(r *bytes.Reader) error {
 	count, err := ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
-
-	// 跳过所有槽位
 	for i := int32(0); i < count; i++ {
-		if err := skipSlotComponents(r); err != nil {
+		if err := SkipNBT(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipEnchantmentList(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipCustomModelData(r *bytes.Reader) error {
+	if err := skipFloat32List(r); err != nil {
+		return err
+	}
+	if err := skipBoolList(r); err != nil {
+		return err
+	}
+	if err := skipStringList(r); err != nil {
+		return err
+	}
+	return skipInt32List(r)
+}
+
+func skipTooltipDisplay(r *bytes.Reader) error {
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipFoodComponent(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	_, err := ReadBoolFromReader(r)
+	return err
+}
+
+func skipConsumeEffectsComponent(r *bytes.Reader) error {
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if err := skipSoundHolderApprox(r); err != nil {
+		return err
+	}
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := skipItemConsumeEffect(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipUseCooldown(r *bytes.Reader) error {
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	return skipOptionalString(r)
+}
+
+func skipToolComponent(r *bytes.Reader) error {
+	rules, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < rules; i++ {
+		if err := skipIDSetApprox(r); err != nil {
+			return err
+		}
+		if err := skipOptionalFloat32(r); err != nil {
+			return err
+		}
+		if err := skipOptionalBool(r); err != nil {
+			return err
+		}
+	}
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	_, err = ReadBoolFromReader(r)
+	return err
+}
+
+func skipEquippableComponent(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if err := skipSoundHolderApprox(r); err != nil {
+		return err
+	}
+	if err := skipOptionalString(r); err != nil {
+		return err
+	}
+	if err := skipOptionalString(r); err != nil {
+		return err
+	}
+	if err := skipOptionalIDSetApprox(r); err != nil {
+		return err
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := ReadBoolFromReader(r); err != nil {
+			return err
+		}
+	}
+	return skipSoundHolderApprox(r)
+}
+
+func skipBlocksAttacksComponent(r *bytes.Reader) error {
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	damageReductions, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < damageReductions; i++ {
+		if _, err := ReadFloat32FromReader(r); err != nil {
+			return err
+		}
+		if err := skipOptionalIDSetApprox(r); err != nil {
+			return err
+		}
+		if err := skipFloat32Values(r, 2); err != nil {
+			return err
+		}
+	}
+	if err := skipFloat32Values(r, 3); err != nil {
+		return err
+	}
+	if err := skipOptionalString(r); err != nil {
+		return err
+	}
+	if err := skipOptionalSoundHolderApprox(r); err != nil {
+		return err
+	}
+	return skipOptionalSoundHolderApprox(r)
+}
+
+func skipPiercingWeaponComponent(r *bytes.Reader) error {
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	if err := skipOptionalSoundHolderApprox(r); err != nil {
+		return err
+	}
+	return skipOptionalSoundHolderApprox(r)
+}
+
+func skipKineticWeaponComponent(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	for i := 0; i < 3; i++ {
+		if err := skipOptionalKineticWeaponCondition(r); err != nil {
+			return err
+		}
+	}
+	if err := skipFloat32Values(r, 2); err != nil {
+		return err
+	}
+	if err := skipOptionalSoundHolderApprox(r); err != nil {
+		return err
+	}
+	return skipOptionalSoundHolderApprox(r)
+}
+
+func skipPotionContents(r *bytes.Reader) error {
+	if err := skipOptionalVarInt(r); err != nil {
+		return err
+	}
+	if err := skipOptionalInt32(r); err != nil {
+		return err
+	}
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := skipItemPotionEffect(r); err != nil {
+			return err
+		}
+	}
+	return skipOptionalString(r)
+}
+
+func skipSuspiciousStewEffects(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipWritableBookContent(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+		if err := skipOptionalString(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipWrittenBookContent(r *bytes.Reader) error {
+	if _, err := ReadStringFromReader(r); err != nil {
+		return err
+	}
+	if err := skipOptionalString(r); err != nil {
+		return err
+	}
+	if _, err := ReadStringFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := SkipNBT(r); err != nil {
+			return err
+		}
+		if err := skipOptionalNBT(r); err != nil {
+			return err
+		}
+	}
+	_, err = ReadBoolFromReader(r)
+	return err
+}
+
+func skipTrimComponentApprox(r *bytes.Reader) error {
+	if err := skipRegistryEntryHolderApprox(r); err != nil {
+		return err
+	}
+	return skipRegistryEntryHolderApprox(r)
+}
+
+func skipLodestoneTracker(r *bytes.Reader) error {
+	if err := skipOptionalGlobalPos(r); err != nil {
+		return err
+	}
+	_, err := ReadBoolFromReader(r)
+	return err
+}
+
+func skipFireworkExplosion(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if err := skipInt32List(r); err != nil {
+		return err
+	}
+	if err := skipInt32List(r); err != nil {
+		return err
+	}
+	if _, err := ReadBoolFromReader(r); err != nil {
+		return err
+	}
+	_, err := ReadBoolFromReader(r)
+	return err
+}
+
+func skipResolvableProfile(r *bytes.Reader) error {
+	profileType, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	switch profileType {
+	case 0:
+		if err := skipOptionalString(r); err != nil {
+			return err
+		}
+		if err := skipOptionalUUID(r); err != nil {
+			return err
+		}
+	case 1:
+		if err := skipUUID(r); err != nil {
+			return err
+		}
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown resolvable profile type %d", profileType)
+	}
+
+	properties, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < properties; i++ {
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+		if err := skipOptionalString(r); err != nil {
 			return err
 		}
 	}
 
+	for i := 0; i < 3; i++ {
+		if err := skipOptionalString(r); err != nil {
+			return err
+		}
+	}
+	return skipOptionalVarInt(r)
+}
+
+func skipBeesComponent(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := SkipNBT(r); err != nil {
+			return err
+		}
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipItemBlockPredicates(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := skipOptionalIDSetApprox(r); err != nil {
+			return err
+		}
+		hasProperties, err := ReadBoolFromReader(r)
+		if err != nil {
+			return err
+		}
+		if hasProperties {
+			propertyCount, err := ReadVarIntFromReader(r)
+			if err != nil {
+				return err
+			}
+			for j := int32(0); j < propertyCount; j++ {
+				if _, err := ReadStringFromReader(r); err != nil {
+					return err
+				}
+				exact, err := ReadBoolFromReader(r)
+				if err != nil {
+					return err
+				}
+				if _, err := ReadStringFromReader(r); err != nil {
+					return err
+				}
+				if !exact {
+					if _, err := ReadStringFromReader(r); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if err := skipOptionalNBT(r); err != nil {
+			return err
+		}
+		exactMatchers, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return err
+		}
+		for j := int32(0); j < exactMatchers; j++ {
+			componentType, err := ReadVarIntFromReader(r)
+			if err != nil {
+				return err
+			}
+			if err := skipComponentByType(r, componentType); err != nil {
+				return err
+			}
+		}
+		partialMatchers, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return err
+		}
+		for j := int32(0); j < partialMatchers; j++ {
+			if _, err := ReadVarIntFromReader(r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func skipAttributeModifiers(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadFloat64FromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	displayType, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	if displayType == 2 {
+		return SkipNBT(r)
+	}
+	return nil
+}
+
+func skipItemPotionEffect(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	return skipItemEffectDetail(r)
+}
+
+func skipItemEffectDetail(r *bytes.Reader) error {
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := ReadBoolFromReader(r); err != nil {
+			return err
+		}
+	}
+	hasHidden, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if hasHidden {
+		return skipItemEffectDetail(r)
+	}
+	return nil
+}
+
+func skipItemConsumeEffect(r *bytes.Reader) error {
+	effectType, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	switch effectType {
+	case 0:
+		count, err := ReadVarIntFromReader(r)
+		if err != nil {
+			return err
+		}
+		for i := int32(0); i < count; i++ {
+			if err := skipItemPotionEffect(r); err != nil {
+				return err
+			}
+		}
+		_, err = ReadFloat32FromReader(r)
+		return err
+	case 1:
+		return skipIDSetApprox(r)
+	case 2:
+		return nil
+	case 3:
+		_, err := ReadFloat32FromReader(r)
+		return err
+	case 4:
+		return skipSoundHolderApprox(r)
+	default:
+		return fmt.Errorf("unknown consume effect type %d", effectType)
+	}
+}
+
+func skipSoundHolderApprox(r *bytes.Reader) error {
+	_, err := ReadVarIntFromReader(r)
+	return err
+}
+
+func skipOptionalSoundHolderApprox(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	return skipSoundHolderApprox(r)
+}
+
+func skipHolderOrStringApprox(r *bytes.Reader) error {
+	hasHolder, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if hasHolder {
+		return skipRegistryEntryHolderApprox(r)
+	}
+	_, err = ReadStringFromReader(r)
+	return err
+}
+
+func skipRegistryEntryHolderApprox(r *bytes.Reader) error {
+	_, err := ReadVarIntFromReader(r)
+	return err
+}
+
+func skipIDSetApprox(r *bytes.Reader) error {
+	lengthOrCount, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	if lengthOrCount < 0 {
+		return fmt.Errorf("invalid IDSet marker: %d", lengthOrCount)
+	}
+
+	if lengthOrCount == 0 {
+		looksLikeName, strLen, err := peekIdentifierStringLength(r)
+		if err != nil {
+			return err
+		}
+		if looksLikeName {
+			return DiscardN(r, strLen)
+		}
+		return nil
+	}
+
+	looksLikeName, strLen, err := peekFixedLengthIdentifier(r, int(lengthOrCount))
+	if err != nil {
+		return err
+	}
+	if looksLikeName {
+		return DiscardN(r, strLen)
+	}
+
+	for i := int32(0); i < lengthOrCount; i++ {
+		if _, err := ReadVarIntFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipOptionalIDSetApprox(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	return skipIDSetApprox(r)
+}
+
+func skipBannerPatternLayerApprox(r *bytes.Reader) error {
+	if err := skipRegistryEntryHolderApprox(r); err != nil {
+		return err
+	}
+	_, err := ReadVarIntFromReader(r)
+	return err
+}
+
+func skipOptionalGlobalPos(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	if _, err := ReadStringFromReader(r); err != nil {
+		return err
+	}
+	return DiscardN(r, 8)
+}
+
+func skipOptionalUUID(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	return skipUUID(r)
+}
+
+func skipUUID(r io.Reader) error {
+	_, err := ReadBytes(r, 16)
+	return err
+}
+
+func skipOptionalString(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	_, err = ReadStringFromReader(r)
+	return err
+}
+
+func skipOptionalNBT(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	return SkipNBT(r)
+}
+
+func skipOptionalVarInt(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	_, err = ReadVarIntFromReader(r)
+	return err
+}
+
+func skipOptionalInt32(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	_, err = ReadInt32FromReader(r)
+	return err
+}
+
+func skipOptionalFloat32(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	_, err = ReadFloat32FromReader(r)
+	return err
+}
+
+func skipOptionalBool(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	_, err = ReadBoolFromReader(r)
+	return err
+}
+
+func skipOptionalKineticWeaponCondition(r *bytes.Reader) error {
+	hasValue, err := ReadBoolFromReader(r)
+	if err != nil {
+		return err
+	}
+	if !hasValue {
+		return nil
+	}
+	if _, err := ReadVarIntFromReader(r); err != nil {
+		return err
+	}
+	if _, err := ReadFloat32FromReader(r); err != nil {
+		return err
+	}
+	_, err = ReadFloat32FromReader(r)
+	return err
+}
+
+func peekIdentifierStringLength(r *bytes.Reader) (bool, int, error) {
+	start, err := r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false, 0, err
+	}
+	defer func() {
+		_, _ = r.Seek(start, io.SeekStart)
+	}()
+
+	length, err := ReadVarIntFromReader(r)
+	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return false, 0, nil
+		}
+		return false, 0, err
+	}
+	if length <= 0 {
+		return false, 0, nil
+	}
+	return peekFixedLengthIdentifier(r, int(length))
+}
+
+func peekFixedLengthIdentifier(r *bytes.Reader, length int) (bool, int, error) {
+	if length <= 0 || length > r.Len() {
+		return false, 0, nil
+	}
+
+	start, err := r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false, 0, err
+	}
+	defer func() {
+		_, _ = r.Seek(start, io.SeekStart)
+	}()
+
+	data, err := ReadBytes(r, length)
+	if err != nil {
+		return false, 0, err
+	}
+	if !looksLikeIdentifierBytes(data) {
+		return false, 0, nil
+	}
+	return true, length, nil
+}
+
+func looksLikeIdentifierBytes(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	for _, b := range data {
+		if b >= 'a' && b <= 'z' {
+			continue
+		}
+		if b >= 'A' && b <= 'Z' {
+			continue
+		}
+		if b >= '0' && b <= '9' {
+			continue
+		}
+		switch b {
+		case ':', '/', '_', '-', '.', '#':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func skipSlotList(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if err := skipSlotData(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipFloat32Values(r *bytes.Reader, count int) error {
+	for i := 0; i < count; i++ {
+		if _, err := ReadFloat32FromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipFloat32List(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadFloat32FromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipBoolList(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadBoolFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipStringList(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadStringFromReader(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipInt32List(r *bytes.Reader) error {
+	count, err := ReadVarIntFromReader(r)
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		if _, err := ReadInt32FromReader(r); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

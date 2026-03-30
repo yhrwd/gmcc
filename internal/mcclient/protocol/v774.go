@@ -83,24 +83,26 @@ const (
 	PlayClientEntityData       int32 = 0x61
 	PlayClientGameEvent        int32 = 0x26
 
-	PlayServerMsgAck          int32 = 0x05
-	PlayServerChatCommand     int32 = 0x06
-	PlayServerChatCommandSign int32 = 0x07
-	PlayServerChatMessage     int32 = 0x08
-	PlayServerChatSession     int32 = 0x09
-	PlayServerAcceptTeleport  int32 = 0x00
-	PlayServerClientInfo      int32 = 0x0D
-	PlayServerContainerClose  int32 = 0x0D
-	PlayServerContainerClick  int32 = 0x0E
-	PlayServerCookieResp      int32 = 0x14
-	PlayServerKeepAlive       int32 = 0x1B
-	PlayServerMoveStatus      int32 = 0x20
-	PlayServerMovePlayerPos   int32 = 0x21 // move_player_pos
-	PlayServerMovePlayerRot   int32 = 0x22 // move_player_rot
-	PlayServerPong            int32 = 0x2C
-	PlayServerResource        int32 = 0x30
-	PlayServerInteract        int32 = 0x19 // 0x19 (25) - interact - 右键点击实体
-	PlayServerSetCarriedItem  int32 = 0x34 // 0x34 (52) - set_carried_item - 切换快捷栏
+	PlayServerMsgAck           int32 = 0x05
+	PlayServerChatCommand      int32 = 0x06
+	PlayServerChatCommandSign  int32 = 0x07
+	PlayServerChatMessage      int32 = 0x08
+	PlayServerChatSession      int32 = 0x09
+	PlayServerClientTickEnd    int32 = 0x0C
+	PlayServerAcceptTeleport   int32 = 0x00
+	PlayServerClientInfo       int32 = 0x0D
+	PlayServerContainerClose   int32 = 0x0D
+	PlayServerContainerClick   int32 = 0x0E
+	PlayServerCookieResp       int32 = 0x14
+	PlayServerKeepAlive        int32 = 0x1B
+	PlayServerMoveStatus       int32 = 0x20
+	PlayServerMovePlayerPos    int32 = 0x1D // move_player_pos
+	PlayServerMovePlayerPosRot int32 = 0x1E // move_player_pos_rot
+	PlayServerMovePlayerRot    int32 = 0x1F // move_player_rot
+	PlayServerPong             int32 = 0x2C
+	PlayServerResource         int32 = 0x30
+	PlayServerInteract         int32 = 0x19 // 0x19 (25) - interact - 右键点击实体
+	PlayServerSetCarriedItem   int32 = 0x34 // 0x34 (52) - set_carried_item - 切换快捷栏
 )
 
 // Interact action types

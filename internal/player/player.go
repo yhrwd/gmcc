@@ -90,6 +90,7 @@ func NewPlayer() *Player {
 		LastUpdate:   time.Now(),
 		FlyingSpeed:  0.05,
 		FieldOfView:  0.1,
+		OnGround:     true,
 	}
 }
 
@@ -167,6 +168,12 @@ func (p *Player) GetRotation() (float32, float32) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.Yaw, p.Pitch
+}
+
+func (p *Player) GetMovementState() (float64, float64, float64, float32, float32, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.X, p.Y, p.Z, p.Yaw, p.Pitch, p.OnGround
 }
 
 func (p *Player) UpdateHealth(health, maxHealth float32, food int32, saturation float32) {

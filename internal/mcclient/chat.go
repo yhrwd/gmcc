@@ -479,22 +479,16 @@ func (c *Client) signChatBody(content string, timestampMillis int64, salt int64,
 		return nil, fmt.Errorf("secure chat 会话未初始化")
 	}
 
-	contentBytes := []byte(content)
-	signable := make([]byte, 0, len(contentBytes)+128+len(acknowledgements)*256)
-	signable = append(signable, packet.EncodeInt32(1)...)
-	signable = append(signable, c.uuid[:]...)
-	signable = append(signable, c.chatSession.sessionID[:]...)
-	signable = append(signable, packet.EncodeInt32(c.chatSession.messageIndex)...)
+	signable := buildChatSignableBody(
+		c.uuid,
+		c.chatSession.sessionID,
+		c.chatSession.messageIndex,
+		content,
+		timestampMillis,
+		salt,
+		acknowledgements,
+	)
 	c.chatSession.messageIndex++
-	signable = append(signable, packet.EncodeInt64(salt)...)
-	signable = append(signable, packet.EncodeInt64(timestampMillis/1000)...)
-	signable = append(signable, packet.EncodeInt32(int32(len(contentBytes)))...)
-	// 签名体这里是 Int32 length + 原始 UTF-8 内容，不是协议 String(VarInt length)。
-	signable = append(signable, contentBytes...)
-	signable = append(signable, packet.EncodeInt32(int32(len(acknowledgements)))...)
-	for _, ack := range acknowledgements {
-		signable = append(signable, ack...)
-	}
 
 	sum := sha256.Sum256(signable)
 	sig, err := rsa.SignPKCS1v15(rand.Reader, c.chatSession.privateKey, crypto.SHA256, sum[:])
@@ -502,6 +496,33 @@ func (c *Client) signChatBody(content string, timestampMillis int64, salt int64,
 		return nil, err
 	}
 	return sig, nil
+}
+
+func buildChatSignableBody(
+	playerUUID [16]byte,
+	sessionID [16]byte,
+	messageIndex int32,
+	content string,
+	timestampMillis int64,
+	salt int64,
+	acknowledgements [][]byte,
+) []byte {
+	contentBytes := []byte(content)
+	signable := make([]byte, 0, len(contentBytes)+128+len(acknowledgements)*256)
+	signable = append(signable, packet.EncodeInt32(1)...)
+	signable = append(signable, playerUUID[:]...)
+	signable = append(signable, sessionID[:]...)
+	signable = append(signable, packet.EncodeInt32(messageIndex)...)
+	signable = append(signable, packet.EncodeInt64(salt)...)
+	signable = append(signable, packet.EncodeInt64(timestampMillis)...)
+	signable = append(signable, packet.EncodeInt32(int32(len(contentBytes)))...)
+	// 签名体这里是 Int32 length + 原始 UTF-8 内容，不是协议 String(VarInt length)。
+	signable = append(signable, contentBytes...)
+	signable = append(signable, packet.EncodeInt32(int32(len(acknowledgements)))...)
+	for _, ack := range acknowledgements {
+		signable = append(signable, ack...)
+	}
+	return signable
 }
 
 func (c *Client) readAnonymousNBTJSON(r io.Reader) (string, error) {

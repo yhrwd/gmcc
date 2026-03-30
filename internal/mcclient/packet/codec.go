@@ -326,3 +326,9 @@ func EncodeFloat32(v float32) []byte {
 	binary.BigEndian.PutUint32(b[:], math.Float32bits(v))
 	return b[:]
 }
+
+func EncodeFloat64(v float64) []byte {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], math.Float64bits(v))
+	return b[:]
+}

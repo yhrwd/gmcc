@@ -192,7 +192,24 @@ func (c *Client) sendAFKHeartbeatIfNeeded() error {
 		return nil
 	}
 	c.lastAFKPacket = time.Now()
-	return c.conn.WritePacket(protocol.PlayServerMoveStatus, []byte{0x01})
+
+	x, y, z, _, _, onGround := c.Player.GetMovementState()
+	flags := byte(0)
+	if onGround {
+		flags |= 0x01
+	}
+
+	payload := make([]byte, 0, 25)
+	payload = append(payload, packet.EncodeFloat64(x)...)
+	payload = append(payload, packet.EncodeFloat64(y)...)
+	payload = append(payload, packet.EncodeFloat64(z)...)
+	payload = append(payload, flags)
+
+	if err := c.conn.WritePacket(protocol.PlayServerMovePlayerPos, payload); err != nil {
+		return err
+	}
+
+	return c.conn.WritePacket(protocol.PlayServerClientTickEnd, nil)
 }
 
 func (c *Client) sendCookieResponse(packetID int32, key string) error {

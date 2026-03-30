@@ -60,7 +60,7 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 
 			c.players[playerName] = playerInfo{uuid: uuid}
 
-			logx.Infof("玩家信息更新: 添加玩家 %s (%s)", playerName, formatUUIDShort(uuid))
+			logx.Debugf("列表添加玩家 %s (%s)", playerName, formatUUIDShort(uuid))
 		} else {
 			playerName = c.findPlayerNameByUUIDLocked(uuid)
 			if playerName == "" {
@@ -87,24 +87,15 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 		}
 
 		if action&playerInfoActionUpdateGameMode != 0 {
-			gamemode := packet.MustReadVarInt(r, "player_info_update.gamemode")
-			if playerName != "" {
-				logx.Debugf("玩家 %s 游戏模式更新: %d", playerName, gamemode)
-			}
+			_ = packet.MustReadVarInt(r, "player_info_update.gamemode")
 		}
 
 		if action&playerInfoActionUpdateListed != 0 {
-			listed := packet.MustReadBool(r, "player_info_update.listed")
-			if playerName != "" {
-				logx.Debugf("玩家 %s 列表状态: %v", playerName, listed)
-			}
+			_ = packet.MustReadBool(r, "player_info_update.listed")
 		}
 
 		if action&playerInfoActionUpdateLatency != 0 {
-			latency := packet.MustReadVarInt(r, "player_info_update.latency")
-			if playerName != "" {
-				logx.Debugf("玩家 %s 延迟: %dms", playerName, latency)
-			}
+			_ = packet.MustReadVarInt(r, "player_info_update.latency")
 		}
 
 		if action&playerInfoActionUpdateDisplayName != 0 {

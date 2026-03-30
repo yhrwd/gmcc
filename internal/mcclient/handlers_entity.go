@@ -8,7 +8,7 @@ import (
 	"math"
 
 	"gmcc/internal/entity"
-	"gmcc/internal/logx"
+	// "gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/mcclient/protocol"
 )
@@ -86,7 +86,7 @@ func (c *Client) handleAddEntity(data []byte) error {
 		c.entityTracker.SpawnEntity(int32(entityID), entityType, uuid, pos, velocity)
 	}
 
-	logx.Debugf("实体生成: ID=%d, Type=%s, Pos=(%.2f, %.2f, %.2f)", entityID, entityType, x, y, z)
+	// logx.Debugf("实体生成: ID=%d, Type=%s, Pos=(%.2f, %.2f, %.2f)", entityID, entityType, x, y, z)
 
 	return nil
 }
@@ -192,7 +192,7 @@ func (c *Client) handleRemoveEntities(data []byte) error {
 		c.entityTracker.RemoveEntities(ids)
 	}
 
-	logx.Debugf("移除 %d 个实体", len(ids))
+	// logx.Debugf("移除 %d 个实体", len(ids))
 
 	return nil
 }
