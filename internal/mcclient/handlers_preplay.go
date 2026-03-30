@@ -17,11 +17,7 @@ import (
 func (c *Client) handleLoginPacket(pkt packet.Packet) error {
 	switch pkt.ID {
 	case protocol.LoginClientDisconnect:
-		r := bytes.NewReader(pkt.Data)
-		reason, err := packet.ReadString(r, r)
-		if err != nil {
-			reason = packet.RawPreview(pkt.Data)
-		}
+		reason := disconnectReasonFromJSON(pkt.Data)
 		return fmt.Errorf("登录阶段被服务器断开: %s", reason)
 
 	case protocol.LoginClientCompression:
@@ -92,7 +88,7 @@ func (c *Client) handleLoginPacket(pkt packet.Packet) error {
 func (c *Client) handleConfigurationPacket(pkt packet.Packet) error {
 	switch pkt.ID {
 	case protocol.CfgClientDisconnect:
-		return fmt.Errorf("配置阶段被服务器断开: %s", packet.RawPreview(pkt.Data))
+		return fmt.Errorf("配置阶段被服务器断开: %s", disconnectReasonFromNBT(pkt.Data))
 
 	case protocol.CfgClientKeepAlive:
 		r := bytes.NewReader(pkt.Data)

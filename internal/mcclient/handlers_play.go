@@ -14,7 +14,7 @@ import (
 func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 	switch pkt.ID {
 	case protocol.PlayClientDisconnect:
-		return fmt.Errorf("Play 阶段被服务器断开: %s", packet.RawPreview(pkt.Data))
+		return fmt.Errorf("Play 阶段被服务器断开: %s", disconnectReasonFromNBT(pkt.Data))
 
 	case protocol.PlayClientKeepAlive:
 		r := bytes.NewReader(pkt.Data)

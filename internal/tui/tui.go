@@ -101,11 +101,13 @@ func (t *TUI) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			t.addLog("\x1b[33m[提示] 断开连接\x1b[0m")
+			t.render()
 			time.Sleep(500 * time.Millisecond)
 			return nil
 		case err := <-errCh:
 			if err != nil {
 				t.addLog(fmt.Sprintf("\x1b[31m[错误] %v\x1b[0m", err))
+				t.render()
 				time.Sleep(2 * time.Second)
 			}
 			return err

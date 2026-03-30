@@ -8,6 +8,17 @@ import (
 	"gmcc/internal/mcclient/packet"
 )
 
+const (
+	playerInfoActionAddPlayer         byte = 0x01
+	playerInfoActionInitializeChat    byte = 0x02
+	playerInfoActionUpdateGameMode    byte = 0x04
+	playerInfoActionUpdateListed      byte = 0x08
+	playerInfoActionUpdateLatency     byte = 0x10
+	playerInfoActionUpdateDisplayName byte = 0x20
+	playerInfoActionUpdateListOrder   byte = 0x40
+	playerInfoActionUpdateShowHat     byte = 0x80
+)
+
 func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 	r := bytes.NewReader(data)
 
@@ -34,8 +45,7 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 		}
 
 		var playerName string
-		// 协议 774 位定义: bit7=add_player, bit6=init_chat, bit5=game_mode, bit4=listed, bit3=latency, bit2=display_name, bit1=list_order, bit0=show_hat
-		if action&0x80 != 0 {
+		if action&playerInfoActionAddPlayer != 0 {
 			playerName = packet.MustReadString(r, "player_info_update.name")
 			propertiesCount := packet.MustReadVarInt(r, "player_info_update.properties_count")
 
@@ -52,58 +62,65 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 
 			logx.Infof("玩家信息更新: 添加玩家 %s (%s)", playerName, formatUUIDShort(uuid))
 		} else {
-			playerName = c.findPlayerNameByUUID(uuid)
+			playerName = c.findPlayerNameByUUIDLocked(uuid)
 			if playerName == "" {
 				logx.Warnf("玩家信息更新: 收到更新但未知玩家 UUID %s (action=0x%02x)", formatUUIDShort(uuid), action)
 			}
 		}
 
-		if action&0x40 != 0 {
-			// initialize_chat: optional chat session
+		if action&playerInfoActionInitializeChat != 0 {
 			hasSession := packet.MustReadBool(r, "player_info_update.has_chat_session")
 			if hasSession {
-				_, _ = packet.ReadUUID(r) // session UUID
-				_, _ = packet.ReadVarInt(r)
-				keyLen := packet.MustReadVarInt(r, "player_info_update.key_len")
-				_, _ = packet.ReadBytes(r, int(keyLen)) // public key
-				sigLen := packet.MustReadVarInt(r, "player_info_update.sig_len")
-				_, _ = packet.ReadBytes(r, int(sigLen)) // signature
+				if _, err := packet.ReadUUID(r); err != nil {
+					return fmt.Errorf("读取 player_info_update.chat_session_id 失败: %w", err)
+				}
+				if _, err := packet.ReadInt64(r); err != nil {
+					return fmt.Errorf("读取 player_info_update.public_key_expiry 失败: %w", err)
+				}
+				if _, err := packet.ReadByteArray(r, r); err != nil {
+					return fmt.Errorf("读取 player_info_update.public_key 失败: %w", err)
+				}
+				if _, err := packet.ReadByteArray(r, r); err != nil {
+					return fmt.Errorf("读取 player_info_update.public_key_signature 失败: %w", err)
+				}
 			}
 		}
 
-		if action&0x20 != 0 {
+		if action&playerInfoActionUpdateGameMode != 0 {
 			gamemode := packet.MustReadVarInt(r, "player_info_update.gamemode")
 			if playerName != "" {
 				logx.Debugf("玩家 %s 游戏模式更新: %d", playerName, gamemode)
 			}
 		}
 
-		if action&0x10 != 0 {
+		if action&playerInfoActionUpdateListed != 0 {
 			listed := packet.MustReadBool(r, "player_info_update.listed")
 			if playerName != "" {
 				logx.Debugf("玩家 %s 列表状态: %v", playerName, listed)
 			}
 		}
 
-		if action&0x08 != 0 {
+		if action&playerInfoActionUpdateLatency != 0 {
 			latency := packet.MustReadVarInt(r, "player_info_update.latency")
 			if playerName != "" {
 				logx.Debugf("玩家 %s 延迟: %dms", playerName, latency)
 			}
 		}
 
-		if action&0x04 != 0 {
+		if action&playerInfoActionUpdateDisplayName != 0 {
 			hasDisplayName := packet.MustReadBool(r, "player_info_update.has_display_name")
 			if hasDisplayName {
-				_ = packet.MustReadString(r, "player_info_update.display_name")
+				if _, err := c.readAnonymousNBTJSON(r); err != nil {
+					return fmt.Errorf("读取 player_info_update.display_name 失败: %w", err)
+				}
 			}
 		}
 
-		if action&0x02 != 0 {
+		if action&playerInfoActionUpdateListOrder != 0 {
 			_ = packet.MustReadVarInt(r, "player_info_update.list_order")
 		}
 
-		if action&0x01 != 0 {
+		if action&playerInfoActionUpdateShowHat != 0 {
 			_ = packet.MustReadBool(r, "player_info_update.show_hat")
 		}
 	}
@@ -176,14 +193,18 @@ func formatUUIDShort(uuid [16]byte) string {
 	return string(hex)
 }
 
-func (c *Client) findPlayerNameByUUID(uuid [16]byte) string {
-	c.playersMu.RLock()
-	defer c.playersMu.RUnlock()
-
+func (c *Client) findPlayerNameByUUIDLocked(uuid [16]byte) string {
 	for name, info := range c.players {
 		if info.uuid == uuid {
 			return name
 		}
 	}
 	return ""
+}
+
+func (c *Client) findPlayerNameByUUID(uuid [16]byte) string {
+	c.playersMu.RLock()
+	defer c.playersMu.RUnlock()
+
+	return c.findPlayerNameByUUIDLocked(uuid)
 }

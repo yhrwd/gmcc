@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"math"
 
 	"gmcc/internal/entity"
 	"gmcc/internal/logx"
@@ -47,6 +49,12 @@ func (c *Client) handleAddEntity(data []byte) error {
 		return fmt.Errorf("读取Z坐标失败: %w", err)
 	}
 
+	// 读取低精度速度向量
+	velocity, err := readLpVec3(r)
+	if err != nil {
+		return fmt.Errorf("读取实体速度失败: %w", err)
+	}
+
 	// 读取角度
 	if _, err := packet.ReadU8(r); err != nil {
 		return fmt.Errorf("读取pitch失败: %w", err)
@@ -63,20 +71,6 @@ func (c *Client) handleAddEntity(data []byte) error {
 		return fmt.Errorf("读取实体数据失败: %w", err)
 	}
 
-	// 读取速度
-	vx, err := readFloat64(r)
-	if err != nil {
-		return fmt.Errorf("读取速度X失败: %w", err)
-	}
-	vy, err := readFloat64(r)
-	if err != nil {
-		return fmt.Errorf("读取速度Y失败: %w", err)
-	}
-	vz, err := readFloat64(r)
-	if err != nil {
-		return fmt.Errorf("读取速度Z失败: %w", err)
-	}
-
 	// 转换为实体类型字符串 (简化处理，实际应该查注册表)
 	entityType := fmt.Sprintf("minecraft:entity_%d", entityTypeID)
 
@@ -87,7 +81,6 @@ func (c *Client) handleAddEntity(data []byte) error {
 	}
 
 	pos := entity.Position{X: x, Y: y, Z: z}
-	velocity := entity.Vector3{X: vx, Y: vy, Z: vz}
 
 	if c.entityTracker != nil {
 		c.entityTracker.SpawnEntity(int32(entityID), entityType, uuid, pos, velocity)
@@ -122,20 +115,15 @@ func (c *Client) handleTeleportEntity(data []byte) error {
 		return fmt.Errorf("读取Z坐标失败: %w", err)
 	}
 
-	// 读取相对标志
-	if _, err := packet.ReadU8(r); err != nil {
-		return fmt.Errorf("读取相对标志失败: %w", err)
-	}
-
 	// 读取速度
 	if _, err := readFloat64(r); err != nil {
-		return fmt.Errorf("读取速度失败: %w", err)
+		return fmt.Errorf("读取速度X失败: %w", err)
 	}
 	if _, err := readFloat64(r); err != nil {
-		return fmt.Errorf("读取速度失败: %w", err)
+		return fmt.Errorf("读取速度Y失败: %w", err)
 	}
 	if _, err := readFloat64(r); err != nil {
-		return fmt.Errorf("读取速度失败: %w", err)
+		return fmt.Errorf("读取速度Z失败: %w", err)
 	}
 
 	// 读取旋转
@@ -195,31 +183,126 @@ func (c *Client) handleMoveEntityPos(data []byte) error {
 
 // handleRemoveEntities 处理实体移除包 (0x4B)
 func (c *Client) handleRemoveEntities(data []byte) error {
-	r := bytes.NewReader(data)
-
-	// 读取实体数量
-	count, err := packet.ReadVarInt(r)
+	ids, err := decodeRemoveEntityIDs(data)
 	if err != nil {
-		return fmt.Errorf("读取实体数量失败: %w", err)
-	}
-
-	// 读取实体ID列表
-	ids := make([]int32, count)
-	for i := int32(0); i < count; i++ {
-		id, err := packet.ReadVarInt(r)
-		if err != nil {
-			return fmt.Errorf("读取实体ID失败: %w", err)
-		}
-		ids[i] = int32(id)
+		return err
 	}
 
 	if c.entityTracker != nil {
 		c.entityTracker.RemoveEntities(ids)
 	}
 
-	logx.Debugf("移除 %d 个实体", count)
+	logx.Debugf("移除 %d 个实体", len(ids))
 
 	return nil
+}
+
+func decodeRemoveEntityIDs(data []byte) ([]int32, error) {
+	if ids, err := decodeRemoveEntityIDsByteArray(data); err == nil {
+		return ids, nil
+	}
+	return decodeRemoveEntityIDsCounted(data)
+}
+
+func decodeRemoveEntityIDsByteArray(data []byte) ([]int32, error) {
+	r := bytes.NewReader(data)
+	payload, err := packet.ReadByteArray(r, r)
+	if err != nil {
+		return nil, fmt.Errorf("读取实体ID字节数组失败: %w", err)
+	}
+	if r.Len() != 0 {
+		return nil, fmt.Errorf("实体ID字节数组后仍有 %d 字节未读取", r.Len())
+	}
+	return decodeRemoveEntityIDsPayload(payload)
+}
+
+func decodeRemoveEntityIDsPayload(data []byte) ([]int32, error) {
+	r := bytes.NewReader(data)
+	ids := make([]int32, 0)
+	for r.Len() > 0 {
+		id, err := packet.ReadVarInt(r)
+		if err != nil {
+			return nil, fmt.Errorf("读取实体ID失败: %w", err)
+		}
+		ids = append(ids, int32(id))
+	}
+	return ids, nil
+}
+
+func decodeRemoveEntityIDsCounted(data []byte) ([]int32, error) {
+	r := bytes.NewReader(data)
+	count, err := packet.ReadVarInt(r)
+	if err != nil {
+		return nil, fmt.Errorf("读取实体数量失败: %w", err)
+	}
+
+	ids := make([]int32, 0, count)
+	for i := int32(0); i < count; i++ {
+		id, err := packet.ReadVarInt(r)
+		if err != nil {
+			return nil, fmt.Errorf("读取实体ID失败: %w", err)
+		}
+		ids = append(ids, int32(id))
+	}
+
+	if r.Len() != 0 {
+		return nil, fmt.Errorf("实体ID列表后仍有 %d 字节未读取", r.Len())
+	}
+	return ids, nil
+}
+
+const (
+	lpDataBits    = 15
+	lpDataMask    = (1 << lpDataBits) - 1
+	lpMaxQuantize = 32766.0
+	lpScaleMask   = 3
+	lpContFlag    = 4
+)
+
+// readLpVec3 读取实体速度使用的低精度三维向量。
+// 协议格式与 Minecraft 的 net.minecraft.network.LpVec3 一致。
+func readLpVec3(r io.Reader) (entity.Vector3, error) {
+	lowest, err := packet.ReadU8(r)
+	if err != nil {
+		return entity.Vector3{}, fmt.Errorf("读取最低字节失败: %w", err)
+	}
+
+	if lowest == 0 {
+		return entity.Vector3{}, nil
+	}
+
+	middle, err := packet.ReadU8(r)
+	if err != nil {
+		return entity.Vector3{}, fmt.Errorf("读取中间字节失败: %w", err)
+	}
+
+	rest, err := packet.ReadBytes(r, 4)
+	if err != nil {
+		return entity.Vector3{}, fmt.Errorf("读取高位字节失败: %w", err)
+	}
+
+	highest := uint64(binary.BigEndian.Uint32(rest))
+	buffer := highest<<16 | uint64(middle)<<8 | uint64(lowest)
+
+	scale := uint64(lowest & lpScaleMask)
+	if lowest&lpContFlag != 0 {
+		extra, err := packet.ReadVarIntFromReader(r)
+		if err != nil {
+			return entity.Vector3{}, fmt.Errorf("读取速度缩放扩展失败: %w", err)
+		}
+		scale |= uint64(uint32(extra)) << 2
+	}
+
+	return entity.Vector3{
+		X: lpUnpack(buffer>>3) * float64(scale),
+		Y: lpUnpack(buffer>>18) * float64(scale),
+		Z: lpUnpack(buffer>>33) * float64(scale),
+	}, nil
+}
+
+func lpUnpack(value uint64) float64 {
+	raw := float64(value & lpDataMask)
+	return math.Min(raw, lpMaxQuantize)*2.0/lpMaxQuantize - 1.0
 }
 
 // readFloat64 从reader读取float64

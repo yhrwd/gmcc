@@ -51,7 +51,7 @@ func containerTypeName(t int32) string {
 
 func (c *Client) handleOpenScreenPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	name, err := c.readAnonymousNBTJSON(r)
+	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (c *Client) handleOpenScreenPacket(data []byte) error {
 	if err != nil {
 		return err
 	}
-	containerId, err := packet.ReadVarIntFromReader(r)
+	name, err := c.readAnonymousNBTJSON(r)
 	if err != nil {
 		return err
 	}
@@ -92,16 +92,16 @@ func (c *Client) handleContainerClosePacket(data []byte) error {
 
 func (c *Client) handleContainerSetDataPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	propertyId, err := packet.ReadVarIntFromReader(r)
-	if err != nil {
-		return err
-	}
 	containerId, err := packet.ReadVarIntFromReader(r)
 	if err != nil {
 		return err
 	}
-	value, err := packet.ReadVarIntFromReader(r)
-	if err != nil {
+	var propertyId int16
+	if err := binary.Read(r, binary.BigEndian, &propertyId); err != nil {
+		return err
+	}
+	var value int16
+	if err := binary.Read(r, binary.BigEndian, &value); err != nil {
 		return err
 	}
 
