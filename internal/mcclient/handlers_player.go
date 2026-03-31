@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
@@ -32,6 +33,18 @@ func (c *Client) handleSetHealthPacket(data []byte) error {
 	}
 
 	c.Player.UpdateHealth(health, 0, int32(food), saturation)
+
+	// 检测死亡状态并自动重生
+	if health <= 0 {
+		logx.Infof("检测到玩家死亡，自动发送重生数据包")
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			if err := c.SendClientCommand(ClientCommandActionPerformRespawn); err != nil {
+				logx.Warnf("发送重生数据包失败: %v", err)
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -109,11 +122,26 @@ func (c *Client) handlePlayLoginPacket(data []byte) error {
 	if err := c.readLoginDeathLocation(r); err != nil {
 		return err
 	}
+	showDeathScreen, err := packet.ReadBoolFromReader(r)
+	if err != nil {
+		return fmt.Errorf("读取 show_death_screen 失败: %w", err)
+	}
 	if err := c.readLoginMisc(r); err != nil {
 		return err
 	}
 
 	logx.Infof("登录Play阶段: EntityID=%d, 维度=%s, 游戏模式=%s", c.Player.EntityID, c.Player.Dimension, c.Player.GameMode.String())
+
+	if showDeathScreen {
+		logx.Infof("检测到死亡状态，自动发送重生数据包")
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			if err := c.SendClientCommand(ClientCommandActionPerformRespawn); err != nil {
+				logx.Warnf("发送重生数据包失败: %v", err)
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -180,9 +208,7 @@ func (c *Client) readLoginPlayerState(r *bytes.Reader) error {
 	}
 	c.Player.SetGameMode(player.GameMode(int(gameMode)))
 
-	_ = packet.MustReadU8(r, "login.prevGameMode") // prevGameMode
-	_ = packet.MustReadBool(r, "login.isDebug")    // isDebug
-	_ = packet.MustReadBool(r, "login.isFlat")     // isFlat
+	_, _ = packet.ReadU8(r) // prevGameMode
 	return nil
 }
 
@@ -202,6 +228,9 @@ func (c *Client) readLoginDeathLocation(r *bytes.Reader) error {
 }
 
 func (c *Client) readLoginMisc(r *bytes.Reader) error {
+	_ = packet.MustReadVarInt(r, "login.isDebug")          // isDebug
+	_ = packet.MustReadVarInt(r, "login.isFlat")           // isFlat
+	_ = packet.MustReadBool(r, "login.keepAllPlayerData")  // keepAllPlayerData
 	_ = packet.MustReadVarInt(r, "login.portalCooldown")   // portalCooldown
 	_ = packet.MustReadVarInt(r, "login.seaLevel")         // seaLevel
 	_ = packet.MustReadBool(r, "login.secureChatEnforced") // secureChatEnforced

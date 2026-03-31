@@ -64,14 +64,22 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 
 		relBits := packet.MustReadVarInt(r, "player_position.relBits")
 
-		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x",
-			teleportID, x, y, z, yRot, xRot, relBits)
+		// 处理相对坐标 (服务器传送时使用相对坐标)
+		px, py, pz := c.Player.GetPosition()
+		if relBits&0x01 != 0 {
+			x = px + x
+		}
+		if relBits&0x02 != 0 {
+			y = py + y
+		}
+		if relBits&0x04 != 0 {
+			z = pz + z
+		}
 
-		c.Player.UpdatePosition(x, y, z, yRot, xRot, int8(relBits))
+		logx.Debugf("player_position: teleportID=%d, pos=(%.2f,%.2f,%.2f), rot=(%.2f,%.2f), rel=0x%x, delta=(%.4f,%.4f,%.4f)",
+			teleportID, x, y, z, yRot, xRot, relBits, deltaX, deltaY, deltaZ)
 
-		_ = deltaX
-		_ = deltaY
-		_ = deltaZ
+		c.Player.UpdatePosition(x, y, z, yRot, xRot, 0) // 重置相对标志，因为我们已处理过了
 
 		if err := c.conn.WritePacket(protocol.PlayServerAcceptTeleport, packet.EncodeVarInt(teleportID)); err != nil {
 			return fmt.Errorf("发送 accept_teleportation 失败: %w", err)
@@ -107,6 +115,7 @@ func (c *Client) handlePlayPacket(pkt packet.Packet) error {
 				logx.Warnf("初始化 secure chat 会话失败: %v", err)
 			}
 			c.initializeTrackers()
+			c.startTicker()
 			c.runOnJoinActions()
 		}
 		return nil

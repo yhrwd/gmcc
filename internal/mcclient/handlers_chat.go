@@ -72,13 +72,16 @@ func (c *Client) handleProfilelessChatPacket(data []byte) error {
 
 func (c *Client) handlePlayerChatPacket(data []byte) error {
 	r := bytes.NewReader(data)
+
 	if _, err := packet.ReadVarInt(r); err != nil {
 		return fmt.Errorf("解析 player_chat globalIndex 失败: %w", err)
 	}
+
 	sender, err := packet.ReadUUID(r)
 	if err != nil {
-		return fmt.Errorf("解析 player_chat senderUuid 失败: %w", err)
+		return fmt.Errorf("解析 player_chat sender 失败: %w", err)
 	}
+
 	if _, err := packet.ReadVarInt(r); err != nil {
 		return fmt.Errorf("解析 player_chat index 失败: %w", err)
 	}
@@ -95,42 +98,132 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 
 	plain, err := packet.ReadString(r, r)
 	if err != nil {
-		return fmt.Errorf("解析 player_chat plainMessage 失败: %w", err)
+		return fmt.Errorf("解析 player_chat content 失败: %w", err)
 	}
+
 	if _, err := packet.ReadInt64(r); err != nil {
-		return fmt.Errorf("解析 player_chat timestamp 失败: %w", err)
+		return fmt.Errorf("解析 player_chat timeStamp 失败: %w", err)
 	}
+
 	if _, err := packet.ReadInt64(r); err != nil {
 		return fmt.Errorf("解析 player_chat salt 失败: %w", err)
 	}
 
-	prevCount, err := packet.ReadVarInt(r)
+	bodyCount, err := packet.ReadVarInt(r)
 	if err != nil {
-		return fmt.Errorf("解析 player_chat previousMessages 数量失败: %w", err)
+		return fmt.Errorf("解析 player_chat body 数量失败: %w", err)
 	}
-	for i := int32(0); i < prevCount; i++ {
+	for i := int32(0); i < bodyCount; i++ {
 		id, err := packet.ReadVarInt(r)
 		if err != nil {
-			return fmt.Errorf("解析 player_chat previousMessage.id 失败: %w", err)
+			return fmt.Errorf("解析 player_chat body[%d].id 失败: %w", i, err)
 		}
 		if id == 0 {
 			if err := packet.DiscardN(r, 256); err != nil {
-				return fmt.Errorf("跳过 player_chat previousMessage.signature 失败: %w", err)
+				return fmt.Errorf("跳过 player_chat body[%d].lastSeen.fullSignature 失败: %w", i, err)
 			}
 		}
 	}
 
-	var rawJSON string
-	hasUnsigned, err := packet.ReadBool(r)
+	hasUnsignedContent, err := packet.ReadBool(r)
 	if err != nil {
-		return fmt.Errorf("解析 player_chat unsignedChatContent 标记失败: %w", err)
+		return fmt.Errorf("解析 player_chat unsignedContent 标记失败: %w", err)
 	}
-	if hasUnsigned {
+	var rawJSON string
+	if hasUnsignedContent {
 		rawJSON, err = c.readAnonymousNBTJSON(r)
 		if err != nil {
-			return fmt.Errorf("解析 player_chat unsignedChatContent 失败: %w", err)
+			return fmt.Errorf("解析 player_chat unsignedContent 失败: %w", err)
 		}
 	}
+
+	filterType, err := packet.ReadVarInt(r)
+	if err != nil {
+		return fmt.Errorf("解析 player_chat filterMask.type 失败: %w", err)
+	}
+	if filterType == 2 {
+		maskCount, err := packet.ReadVarInt(r)
+		if err != nil {
+			return fmt.Errorf("解析 player_chat filterMask.mask 数量失败: %w", err)
+		}
+		if err := packet.DiscardN(r, int(maskCount)*8); err != nil {
+			return fmt.Errorf("跳过 player_chat filterMask.mask 失败: %w", err)
+		}
+	}
+
+	chatTypeIdx, err := packet.ReadVarInt(r)
+	if err != nil {
+		return fmt.Errorf("解析 player_chat chatType.chat 失败: %w", err)
+	}
+	if chatTypeIdx == 0 {
+		if _, err := packet.ReadString(r, r); err != nil {
+			return fmt.Errorf("解析 player_chat chatType.chat.translationKey 失败: %w", err)
+		}
+		chatParamsCount, err := packet.ReadVarInt(r)
+		if err != nil {
+			return fmt.Errorf("解析 player_chat chatType.chat.parameters 数量失败: %w", err)
+		}
+		for i := int32(0); i < chatParamsCount; i++ {
+			if _, err := packet.ReadVarInt(r); err != nil {
+				return fmt.Errorf("解析 player_chat chatType.chat.parameters[%d] 失败: %w", i, err)
+			}
+		}
+		if _, err := c.readAnonymousNBTJSON(r); err != nil {
+			return fmt.Errorf("解析 player_chat chatType.chat.style 失败: %w", err)
+		}
+	}
+
+	narrationIdx, err := packet.ReadVarInt(r)
+	if err != nil {
+		return fmt.Errorf("解析 player_chat chatType.narration 失败: %w", err)
+	}
+	if narrationIdx == 0 {
+		if _, err := packet.ReadString(r, r); err != nil {
+			return fmt.Errorf("解析 player_chat chatType.narration.translationKey 失败: %w", err)
+		}
+		narrParamsCount, err := packet.ReadVarInt(r)
+		if err != nil {
+			return fmt.Errorf("解析 player_chat chatType.narration.parameters 数量失败: %w", err)
+		}
+		for i := int32(0); i < narrParamsCount; i++ {
+			if _, err := packet.ReadVarInt(r); err != nil {
+				return fmt.Errorf("解析 player_chat chatType.narration.parameters[%d] 失败: %w", i, err)
+			}
+		}
+		if _, err := c.readAnonymousNBTJSON(r); err != nil {
+			return fmt.Errorf("解析 player_chat chatType.narration.style 失败: %w", err)
+		}
+	}
+
+	hasName, err := packet.ReadBool(r)
+	if err != nil {
+		return fmt.Errorf("解析 player_chat name 标记失败: %w", err)
+	}
+	logx.Debugf("[DEBUG] player_chat hasName: %v", hasName)
+	var senderName string
+	if hasName {
+		nameJSON, err := c.readAnonymousNBTJSON(r)
+		if err != nil {
+			logx.Debugf("[DEBUG] player_chat name NBT 解析失败: %v, 尝试作为字符串读取", err)
+			nameStr, strErr := packet.ReadString(r, r)
+			if strErr != nil {
+				logx.Debugf("[DEBUG] player_chat name 字符串读取也失败: %v", strErr)
+				senderName = ""
+			} else {
+				senderName = nameStr
+			}
+		} else {
+			logx.Debugf("[DEBUG] player_chat name JSON: %s", nameJSON)
+			senderName = chat.ExtractPlainTextFromChatJSON(nameJSON)
+		}
+	}
+
+	hasTargetName, err := packet.ReadBool(r)
+	if err == nil && hasTargetName {
+		_, _ = c.readAnonymousNBTJSON(r)
+	}
+
+	logx.Debugf("[DEBUG] player_chat senderName: %s", senderName)
 	logx.Debugf("[RAW JSON] player_chat: %s", rawJSON)
 
 	c.emitChat(ChatMessage{
@@ -138,6 +231,7 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 		PlainText:  plain,
 		RawJSON:    rawJSON,
 		SenderUUID: packet.FormatUUID(sender),
+		SenderName: senderName,
 		ReceivedAt: time.Now(),
 	})
 	return nil
@@ -232,9 +326,6 @@ func (c *Client) handleDeclareCommandsPacket(data []byte) error {
 	c.chatSignMu.Unlock()
 
 	logx.Debugf("已解析 declare_commands: nodes=%d signableCommands=%d", nodeCount, len(targets))
-	for cmd, target := range targets {
-		logx.Debugf("命令签名规则: /%s arg=%s sliceIndex=%d", cmd, target.ArgumentName, target.SliceIndex)
-	}
 	return nil
 }
 

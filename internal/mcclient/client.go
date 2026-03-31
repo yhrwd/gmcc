@@ -51,6 +51,8 @@ type Client struct {
 	conn *packet.PacketConn
 
 	lastAFKPacket time.Time
+	ticker        *time.Ticker
+	tickerDone    chan struct{}
 	chatHandler   func(ChatMessage)
 	chatSessionOK bool
 	chatSession   *secureChatSession
@@ -134,6 +136,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 	c.chatSession = nil
 	c.commandSign = map[string]signableCommandTarget{}
 	c.lastAFKPacket = time.Now()
+	c.tickerDone = make(chan struct{})
 
 	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
 	dialer := net.Dialer{Timeout: constants.DialTimeout}
@@ -144,6 +147,7 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 
 	c.conn = packet.NewPacketConn(rawConn)
 	defer func() {
+		c.stopTicker()
 		if c.conn != nil {
 			_ = c.conn.Close()
 		}
@@ -342,6 +346,48 @@ func (c *Client) initializeTrackers() {
 	c.NearbyPlayers = player.NewNearbyTracker(c.entityTracker, c.getPlayerInfoByUUID)
 }
 
+// startTicker 启动游戏刻循环，发送位置更新
+func (c *Client) startTicker() {
+	c.ticker = time.NewTicker(constants.TickInterval)
+	go func() {
+		for {
+			select {
+			case <-c.tickerDone:
+				return
+			case <-c.ticker.C:
+				c.tick()
+			}
+		}
+	}()
+	logx.Debugf("已启动游戏刻循环 (20Hz)")
+}
+
+// stopTicker 停止游戏刻循环
+func (c *Client) stopTicker() {
+	if c.ticker != nil {
+		c.ticker.Stop()
+		c.ticker = nil
+	}
+	if c.tickerDone != nil {
+		close(c.tickerDone)
+		c.tickerDone = nil
+	}
+}
+
+// tick 每个游戏刻执行一次
+func (c *Client) tick() {
+	if c.state != protocol.StatePlay || c.conn == nil {
+		return
+	}
+
+	x, y, z, yaw, pitch, onGround := c.Player.GetMovementState()
+	// 使用完整的位置+旋转包确保服务器收到所有状态
+	_ = c.SendPlayerPositionAndRotation(x, y, z, yaw, pitch, onGround)
+
+	// 发送 ClientTickEnd
+	_ = c.conn.WritePacket(protocol.PlayServerClientTickEnd, nil)
+}
+
 // getPlayerInfoByUUID 通过UUID查找玩家用户名
 func (c *Client) getPlayerInfoByUUID(uuid [16]byte) (username string, found bool) {
 	c.playersMu.RLock()
@@ -382,6 +428,56 @@ func (c *Client) SendPlayerRotation(yaw, pitch float32, onGround bool) error {
 	payload = append(payload, packet.EncodeBool(onGround)...)
 
 	return c.conn.WritePacket(protocol.PlayServerMovePlayerRot, payload)
+}
+
+// SendPlayerPosition 发送玩家位置更新包 (move_player_pos)
+// x, y, z: 玩家位置
+// onGround: 是否在地面上
+func (c *Client) SendPlayerPosition(x, y, z float64, onGround bool) error {
+	if c.state != protocol.StatePlay {
+		return nil // 非 Play 状态时静默忽略
+	}
+	if c.conn == nil {
+		return nil
+	}
+
+	flags := byte(0)
+	if onGround {
+		flags |= 0x01
+	}
+
+	payload := make([]byte, 0, 25)
+	payload = append(payload, packet.EncodeFloat64(x)...)
+	payload = append(payload, packet.EncodeFloat64(y)...)
+	payload = append(payload, packet.EncodeFloat64(z)...)
+	payload = append(payload, flags)
+
+	return c.conn.WritePacket(protocol.PlayServerMovePlayerPos, payload)
+}
+
+// SendPlayerPositionAndRotation 发送玩家位置和旋转更新包 (move_player_pos_rot)
+func (c *Client) SendPlayerPositionAndRotation(x, y, z float64, yaw, pitch float32, onGround bool) error {
+	if c.state != protocol.StatePlay {
+		return nil
+	}
+	if c.conn == nil {
+		return nil
+	}
+
+	flags := byte(0)
+	if onGround {
+		flags |= 0x01
+	}
+
+	payload := make([]byte, 0, 33)
+	payload = append(payload, packet.EncodeFloat64(x)...)
+	payload = append(payload, packet.EncodeFloat64(y)...)
+	payload = append(payload, packet.EncodeFloat64(z)...)
+	payload = append(payload, packet.EncodeFloat32(yaw)...)
+	payload = append(payload, packet.EncodeFloat32(pitch)...)
+	payload = append(payload, flags)
+
+	return c.conn.WritePacket(protocol.PlayServerMovePlayerPosRot, payload)
 }
 
 // SendSetCarriedItem 切换快捷栏槽位 (0-8 对应快捷栏 1-9)
@@ -438,4 +534,21 @@ func (c *Client) SendInteract(entityID int32, action int32, hand int32, sneaking
 	payload = append(payload, packet.EncodeBool(sneaking)...)
 
 	return c.conn.WritePacket(protocol.PlayServerInteract, payload)
+}
+
+const (
+	ClientCommandActionPerformRespawn int32 = 0
+	ClientCommandActionRequestStats   int32 = 1
+)
+
+func (c *Client) SendClientCommand(action int32) error {
+	if c.state != protocol.StatePlay {
+		return fmt.Errorf("当前状态不是 Play，无法发送客户端命令数据包")
+	}
+	if c.conn == nil {
+		return fmt.Errorf("连接未初始化")
+	}
+
+	payload := packet.EncodeVarInt(action)
+	return c.conn.WritePacket(protocol.PlayClientClientCommand, payload)
 }

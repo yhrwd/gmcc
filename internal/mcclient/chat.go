@@ -30,6 +30,7 @@ type ChatMessage struct {
 	RawJSON     string
 	IsActionBar bool
 	SenderUUID  string
+	SenderName  string
 	ReceivedAt  time.Time
 }
 
@@ -362,6 +363,12 @@ func decodeCertificateSignature(cert *mcauth.PlayerCertificatesResponse) ([]byte
 func (c *Client) emitChat(chat ChatMessage) {
 	if strings.TrimSpace(chat.RawJSON) != "" {
 		logx.Infof("[聊天] %s", chat.RawJSON)
+	} else if strings.TrimSpace(chat.PlainText) != "" {
+		sender := chat.SenderName
+		if sender == "" {
+			sender = chat.SenderUUID
+		}
+		logx.Infof("[聊天] <%s> %s", sender, chat.PlainText)
 	}
 
 	if c.chatHandler != nil {

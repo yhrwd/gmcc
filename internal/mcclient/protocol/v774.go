@@ -82,6 +82,7 @@ const (
 	PlayClientPlayerAbilities  int32 = 0x3E
 	PlayClientEntityData       int32 = 0x61
 	PlayClientGameEvent        int32 = 0x26
+	PlayClientClientCommand    int32 = 0x0B
 
 	PlayServerMsgAck           int32 = 0x05
 	PlayServerChatCommand      int32 = 0x06
@@ -199,6 +200,7 @@ var PlayClientPacketNames = map[int32]string{
 	PlayClientPlayerAbilities:  "player_abilities",
 	PlayClientEntityData:       "entity_data",
 	PlayClientGameEvent:        "game_event",
+	PlayClientClientCommand:    "client_command",
 }
 
 func (s State) String() string {
