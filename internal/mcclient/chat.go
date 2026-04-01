@@ -212,7 +212,7 @@ func (c *Client) SendMessage(message string) error {
 		ackSignatures[i] = ackMessages[i].signature[:]
 	}
 
-	signature, signErr := c.signChatBody(msg, timestamp, salt, ackSignatures)
+	signature, signErr := c.signChatBodyWithIndex(msg, timestamp, salt, c.chatSession.messageIndex, ackSignatures)
 	hasSignature := signErr == nil && len(signature) == 256
 	if signErr != nil {
 		logx.Debugf("聊天消息签名不可用，按无签名发送: %v", signErr)
@@ -227,6 +227,13 @@ func (c *Client) SendMessage(message string) error {
 		payload = append(payload, signature...)
 	}
 	payload = append(payload, packet.EncodeVarInt(messageCount)...)
+
+	// 只有在签名成功时才递增消息索引
+	if hasSignature {
+		c.chatSignMu.Lock()
+		c.chatSession.messageIndex++
+		c.chatSignMu.Unlock()
+	}
 	payload = append(payload, acknowledged[:]...)
 	payload = append(payload, 0x01)
 
@@ -483,6 +490,12 @@ func (c *Client) sendSignedCommand(cmd string) error {
 		return fmt.Errorf("生成命令签名 salt 失败: %w", err)
 	}
 
+	// 获取当前消息索引（命令只使用一个索引）
+	c.chatSignMu.Lock()
+	currentIndex := c.chatSession.messageIndex
+	c.chatSession.messageIndex++
+	c.chatSignMu.Unlock()
+
 	// 获取已接收的带签名消息用于确认
 	ackMessages := c.lastSeenBuf.GetAll()
 	messageCount := int32(len(ackMessages))
@@ -497,7 +510,7 @@ func (c *Client) sendSignedCommand(cmd string) error {
 		ackSignatures[i] = ackMessages[i].signature[:]
 	}
 
-	argSignatures, err := c.buildCommandArgumentSignatures(cmd, timestamp, salt, ackSignatures)
+	argSignatures, err := c.buildCommandArgumentSignatures(cmd, timestamp, salt, currentIndex, ackSignatures)
 	if err != nil {
 		return err
 	}
@@ -547,7 +560,7 @@ func (c *Client) logCommandPacket(isSigned bool, cmd string, timestamp int64, sa
 	}
 }
 
-func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int64, salt int64, acknowledgements [][]byte) ([]commandArgumentSignature, error) {
+func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int64, salt int64, messageIndex int32, acknowledgements [][]byte) ([]commandArgumentSignature, error) {
 	verb, _ := splitCommand(cmd)
 	target, ok := c.commandSignTarget(verb)
 	if !ok {
@@ -563,7 +576,7 @@ func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int6
 		return nil, nil
 	}
 
-	sig, err := c.signChatBody(arg, timestampMillis, salt, acknowledgements)
+	sig, err := c.signChatBodyWithIndex(arg, timestampMillis, salt, messageIndex, acknowledgements)
 	if err != nil {
 		return nil, fmt.Errorf("生成命令参数签名失败: %w", err)
 	}
@@ -594,7 +607,7 @@ func splitCommand(cmd string) (verb string, arg string) {
 	return verb, strings.TrimSpace(parts[1])
 }
 
-func (c *Client) signChatBody(content string, timestampMillis int64, salt int64, acknowledgements [][]byte) ([]byte, error) {
+func (c *Client) signChatBodyWithIndex(content string, timestampMillis int64, salt int64, messageIndex int32, acknowledgements [][]byte) ([]byte, error) {
 	c.chatSignMu.Lock()
 	defer c.chatSignMu.Unlock()
 
@@ -605,13 +618,14 @@ func (c *Client) signChatBody(content string, timestampMillis int64, salt int64,
 	signable := buildChatSignableBody(
 		c.uuid,
 		c.chatSession.sessionID,
-		c.chatSession.messageIndex,
+		messageIndex,
 		content,
 		timestampMillis,
 		salt,
 		acknowledgements,
 	)
-	c.chatSession.messageIndex++
+
+	logx.Debugf("[签名] content=%s, index=%d, signableLen=%d, signable=%x", content, messageIndex, len(signable), signable[:min(64, len(signable))])
 
 	sum := sha256.Sum256(signable)
 	sig, err := rsa.SignPKCS1v15(rand.Reader, c.chatSession.privateKey, crypto.SHA256, sum[:])
@@ -619,6 +633,13 @@ func (c *Client) signChatBody(content string, timestampMillis int64, salt int64,
 		return nil, err
 	}
 	return sig, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func buildChatSignableBody(
