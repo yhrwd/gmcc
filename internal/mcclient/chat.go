@@ -396,8 +396,16 @@ func randomUUIDv4() ([16]byte, error) {
 
 func (c *Client) sendUnsignedCommand(cmd string) error {
 	payload := packet.EncodeString(cmd)
-	logx.Debugf("命令包内容 (hex): %x", payload)
+	logx.Debugf("[命令包] 发送无签名命令:")
+	logx.Debugf("  命令: %s", cmd)
+	logx.Debugf("  包体长度: %d bytes", len(payload))
+	logx.Debugf("  完整包体 (hex): %s", formatHexDump(payload, 64))
 	return c.conn.WritePacket(protocol.PlayServerChatCommand, payload)
+}
+
+// formatHexDump 格式化hex输出
+func formatHexDump(data []byte, maxLen int) string {
+	return fmt.Sprintf("%x", data)
 }
 
 func (c *Client) sendSignedCommand(cmd string) error {
@@ -428,7 +436,33 @@ func (c *Client) sendSignedCommand(cmd string) error {
 	payload = append(payload, 0x00, 0x00, 0x00)          // acknowledged (3 bytes)
 	payload = append(payload, 0x01)                      // checksum (u8, 1 when no seen signatures)
 
+	// 调试输出命令包详细信息
+	c.logCommandPacket(true, cmd, timestamp, salt, argSignatures, payload)
+
 	return c.conn.WritePacket(protocol.PlayServerChatCommandSign, payload)
+}
+
+// logCommandPacket 输出命令包的详细调试信息
+func (c *Client) logCommandPacket(isSigned bool, cmd string, timestamp int64, salt int64, signatures []commandArgumentSignature, payload []byte) {
+	if isSigned {
+		logx.Debugf("[命令包] 发送签名命令:")
+		logx.Debugf("  命令: %s", cmd)
+		logx.Debugf("  时间戳: %d", timestamp)
+		logx.Debugf("  盐值: %d", salt)
+		logx.Debugf("  参数签名: %d个", len(signatures))
+		for _, sig := range signatures {
+			logx.Debugf("    - %s: [%d bytes]", sig.name, len(sig.signature))
+		}
+		logx.Debugf("  消息计数: 0")
+		logx.Debugf("  确认位: 000000")
+		logx.Debugf("  校验和: 1")
+		logx.Debugf("  完整包体 (hex): %s", formatHexDump(payload, 64))
+	} else {
+		logx.Debugf("[命令包] 发送无签名命令:")
+		logx.Debugf("  命令: %s", cmd)
+		logx.Debugf("  包体长度: %d bytes", len(payload))
+		logx.Debugf("  完整包体 (hex): %s", formatHexDump(payload, 64))
+	}
 }
 
 func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int64, salt int64) ([]commandArgumentSignature, error) {
