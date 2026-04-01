@@ -657,8 +657,8 @@ func buildChatSignableBody(
 	signable = append(signable, playerUUID[:]...)
 	signable = append(signable, sessionID[:]...)
 	signable = append(signable, packet.EncodeInt32(messageIndex)...)
-	signable = append(signable, packet.EncodeInt64(salt)...)
 	signable = append(signable, packet.EncodeInt64(timestampMillis)...)
+	signable = append(signable, packet.EncodeInt64(salt)...)
 	signable = append(signable, packet.EncodeInt32(int32(len(contentBytes)))...)
 	// 签名体这里是 Int32 length + 原始 UTF-8 内容，不是协议 String(VarInt length)。
 	signable = append(signable, contentBytes...)
