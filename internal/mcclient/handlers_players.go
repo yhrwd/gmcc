@@ -60,11 +60,11 @@ func (c *Client) handlePlayerInfoUpdate(data []byte) error {
 
 			c.players[playerName] = playerInfo{uuid: uuid}
 
-			logx.Debugf("列表添加玩家 %s (%s)", playerName, formatUUIDShort(uuid))
+			logx.Debugf("列表添加玩家 %s (%s)", playerName, packet.FormatUUIDShort(uuid))
 		} else {
 			playerName = c.findPlayerNameByUUIDLocked(uuid)
 			if playerName == "" {
-				logx.Warnf("玩家信息更新: 收到更新但未知玩家 UUID %s (action=0x%02x)", formatUUIDShort(uuid), action)
+				logx.Warnf("玩家信息更新: 收到更新但未知玩家 UUID %s (action=0x%02x)", packet.FormatUUIDShort(uuid), action)
 			}
 		}
 
@@ -172,16 +172,6 @@ func (c *Client) logOnlinePlayers() {
 		playerList = fmt.Sprintf("%s 等 %d 人", playerList, len(players))
 	}
 	logx.Infof("在线玩家: %s", playerList)
-}
-
-func formatUUIDShort(uuid [16]byte) string {
-	const hexChars = "0123456789abcdef"
-	hex := make([]byte, 8)
-	for i := 0; i < 4; i++ {
-		hex[i*2] = hexChars[uuid[i]>>4]
-		hex[i*2+1] = hexChars[uuid[i]&0x0f]
-	}
-	return string(hex)
 }
 
 func (c *Client) findPlayerNameByUUIDLocked(uuid [16]byte) string {

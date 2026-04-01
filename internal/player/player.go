@@ -2,6 +2,7 @@ package player
 
 import (
 	"fmt"
+	"gmcc/internal/mcclient/packet"
 	"sync"
 	"time"
 )
@@ -361,7 +362,7 @@ func (p *Player) GetInfo() map[string]interface{} {
 	defer p.mu.RUnlock()
 	return map[string]interface{}{
 		"name":          p.Name,
-		"uuid":          formatUUID(p.UUID),
+		"uuid":          packet.FormatUUID(p.UUID),
 		"entity_id":     p.EntityID,
 		"gamemode":      p.GameMode.String(),
 		"dimension":     p.Dimension,
@@ -396,14 +397,4 @@ func (g GameMode) String() string {
 	default:
 		return "unknown"
 	}
-}
-
-func formatUUID(uuid [16]byte) string {
-	hex := make([]byte, 32)
-	const hexChars = "0123456789abcdef"
-	for i := 0; i < 16; i++ {
-		hex[i*2] = hexChars[uuid[i]>>4]
-		hex[i*2+1] = hexChars[uuid[i]&0x0f]
-	}
-	return string(hex[0:8]) + "-" + string(hex[8:12]) + "-" + string(hex[12:16]) + "-" + string(hex[16:20]) + "-" + string(hex[20:32])
 }

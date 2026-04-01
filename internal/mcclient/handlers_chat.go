@@ -11,25 +11,40 @@ import (
 	"gmcc/internal/mcclient/packet"
 )
 
-func (c *Client) handleSystemChatPacket(data []byte) error {
-	r := bytes.NewReader(data)
+// readChatMessage 通用聊天消息读取函数
+func (c *Client) readChatMessage(r *bytes.Reader, msgType string) (string, error) {
 	rawJSON, err := c.readAnonymousNBTJSON(r)
 	if err != nil {
-		return fmt.Errorf("解析 system_chat 内容失败: %w", err)
+		return "", fmt.Errorf("解析 %s 内容失败: %w", msgType, err)
 	}
-	logx.Debugf("[RAW JSON] system_chat: %s", rawJSON)
-	isActionBar, err := packet.ReadBool(r)
-	if err != nil {
-		return fmt.Errorf("解析 system_chat actionBar 标记失败: %w", err)
-	}
+	logx.Debugf("[RAW JSON] %s: %s", msgType, rawJSON)
+	return rawJSON, nil
+}
 
-	msg := ChatMessage{
-		Type:        "system",
+// createChatMessage 创建ChatMessage实例
+func createChatMessage(msgType, rawJSON string, isActionBar bool) ChatMessage {
+	return ChatMessage{
+		Type:        msgType,
 		PlainText:   chat.ExtractPlainTextFromChatJSON(rawJSON),
 		RawJSON:     rawJSON,
 		IsActionBar: isActionBar,
 		ReceivedAt:  time.Now(),
 	}
+}
+
+func (c *Client) handleSystemChatPacket(data []byte) error {
+	r := bytes.NewReader(data)
+	rawJSON, err := c.readChatMessage(r, "system_chat")
+	if err != nil {
+		return err
+	}
+
+	isActionBar, err := packet.ReadBool(r)
+	if err != nil {
+		return fmt.Errorf("解析 system_chat actionBar 标记失败: %w", err)
+	}
+
+	msg := createChatMessage("system", rawJSON, isActionBar)
 	if isActionBar {
 		msg.Type = "action_bar"
 	}
@@ -39,34 +54,23 @@ func (c *Client) handleSystemChatPacket(data []byte) error {
 
 func (c *Client) handleActionBarPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	rawJSON, err := c.readAnonymousNBTJSON(r)
+	rawJSON, err := c.readChatMessage(r, "action_bar")
 	if err != nil {
-		return fmt.Errorf("解析 action_bar 内容失败: %w", err)
+		return err
 	}
-	logx.Debugf("[RAW JSON] action_bar: %s", rawJSON)
-	c.emitChat(ChatMessage{
-		Type:        "action_bar",
-		PlainText:   chat.ExtractPlainTextFromChatJSON(rawJSON),
-		RawJSON:     rawJSON,
-		IsActionBar: true,
-		ReceivedAt:  time.Now(),
-	})
+
+	c.emitChat(createChatMessage("action_bar", rawJSON, true))
 	return nil
 }
 
 func (c *Client) handleProfilelessChatPacket(data []byte) error {
 	r := bytes.NewReader(data)
-	rawJSON, err := c.readAnonymousNBTJSON(r)
+	rawJSON, err := c.readChatMessage(r, "profileless_chat")
 	if err != nil {
-		return fmt.Errorf("解析 profileless_chat 内容失败: %w", err)
+		return err
 	}
-	logx.Debugf("[RAW JSON] profileless_chat: %s", rawJSON)
-	c.emitChat(ChatMessage{
-		Type:       "profileless_chat",
-		PlainText:  chat.ExtractPlainTextFromChatJSON(rawJSON),
-		RawJSON:    rawJSON,
-		ReceivedAt: time.Now(),
-	})
+
+	c.emitChat(createChatMessage("profileless_chat", rawJSON, false))
 	return nil
 }
 

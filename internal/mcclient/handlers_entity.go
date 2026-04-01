@@ -10,7 +10,6 @@ import (
 	"gmcc/internal/entity"
 	// "gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
-	"gmcc/internal/mcclient/protocol"
 )
 
 // handleAddEntity 处理实体生成包 (0x01)
@@ -317,16 +316,4 @@ func readFloat32(r *bytes.Reader) (float32, error) {
 	var v float32
 	err := binary.Read(r, binary.BigEndian, &v)
 	return v, err
-}
-
-// init 注册包处理器
-func init() {
-	// 在Client初始化时调用 registerEntityHandlers
-}
-
-// registerEntityHandlers 注册实体相关的包处理器
-func (c *Client) registerEntityHandlers() {
-	// 这个函数将在初始化Trackers时调用
-	// 这里不做任何事情，因为 handler 已经在各自的函数中实现了
-	_ = protocol.PlayClientAddEntity
 }

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"gmcc/internal/mcclient/packet"
 	"regexp"
 	"strings"
 )
@@ -41,7 +42,7 @@ func (p *DefaultParser) Parse(raw RawChat) *Message {
 			PlainText:  content,
 			RawJSON:    raw.RawJSON,
 			Sender:     sender,
-			SenderUUID: formatUUID(raw.SenderUUID),
+			SenderUUID: packet.FormatUUID(raw.SenderUUID),
 			IsPrivate:  true,
 			Timestamp:  raw.Timestamp,
 		}
@@ -56,7 +57,7 @@ func (p *DefaultParser) Parse(raw RawChat) *Message {
 			PlainText:  content,
 			RawJSON:    raw.RawJSON,
 			Sender:     sender,
-			SenderUUID: formatUUID(raw.SenderUUID),
+			SenderUUID: packet.FormatUUID(raw.SenderUUID),
 			IsPrivate:  true,
 			Timestamp:  raw.Timestamp,
 		}
@@ -111,16 +112,4 @@ func (p *DefaultParser) extractPlainText(raw RawChat) string {
 	}
 	sb.WriteString(jsonMsg.Text)
 	return sb.String()
-}
-
-func formatUUID(uuid [16]byte) string {
-	if uuid == [16]byte{} {
-		return ""
-	}
-	hex := make([]byte, 32)
-	for i := 0; i < 16; i++ {
-		hex[i*2] = "0123456789abcdef"[uuid[i]>>4]
-		hex[i*2+1] = "0123456789abcdef"[uuid[i]&0x0f]
-	}
-	return string(hex[0:8]) + "-" + string(hex[8:12]) + "-" + string(hex[12:16]) + "-" + string(hex[16:20]) + "-" + string(hex[20:32])
 }

@@ -72,6 +72,10 @@ func FormatUUID(id [16]byte) string {
 	)
 }
 
+func FormatUUIDShort(id [16]byte) string {
+	return hex.EncodeToString(id[:4])
+}
+
 func MinecraftServerHash(serverID string, sharedSecret []byte, publicKey []byte) string {
 	h := sha1.New()
 	_, _ = h.Write([]byte(serverID))

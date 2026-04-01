@@ -3,6 +3,7 @@ package component
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"gmcc/internal/mcclient/chat"
 	"gmcc/internal/nbt"
@@ -125,7 +126,10 @@ func ParseRarity(typeID int32, r *bytes.Reader) (*ComponentResult, error) {
 
 // ParseVarInt 通用 VarInt 解析
 func ParseVarInt(r *bytes.Reader) (*ComponentResult, error) {
-	value, _ := readVarInt(r)
+	value, err := readVarInt(r)
+	if err != nil {
+		return nil, fmt.Errorf("读取 VarInt 失败: %w", err)
+	}
 	return &ComponentResult{Data: value}, nil
 }
 
