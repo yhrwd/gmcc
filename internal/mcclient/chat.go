@@ -615,6 +615,10 @@ func (c *Client) signChatBodyWithIndex(content string, timestampMillis int64, sa
 		return nil, fmt.Errorf("secure chat 会话未初始化")
 	}
 
+	logx.Debugf("[签名调试] playerUUID=%x, sessionID=%x, messageIndex=%d", c.uuid[:4], c.chatSession.sessionID[:4], messageIndex)
+	logx.Debugf("[签名调试] timestamp=%d, salt=%d, content=%s", timestampMillis, salt, content)
+	logx.Debugf("[签名调试] acknowledgements=%d", len(acknowledgements))
+
 	signable := buildChatSignableBody(
 		c.uuid,
 		c.chatSession.sessionID,
