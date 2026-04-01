@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"gmcc/internal/constants"
@@ -48,6 +49,59 @@ type commandArgumentSignature struct {
 type signableCommandTarget struct {
 	ArgumentName string
 	SliceIndex   int
+}
+
+// lastSeenMessage 存储一条已接收的带签名消息
+type lastSeenMessage struct {
+	signature  [256]byte // 消息签名 (RSA 256 bytes)
+	senderUUID [16]byte  // 发送者 UUID
+	index      int32     // 消息在发送者链中的索引
+}
+
+// lastSeenMessageBuffer 用于存储最近接收的带签名消息（环形缓冲区，最多20条）
+type lastSeenMessageBuffer struct {
+	messages [20]lastSeenMessage
+	head     int // 下一个写入位置
+	count    int // 当前消息数量
+	mu       sync.Mutex
+}
+
+// Add 添加一条新消息，如果已满则覆盖最旧的消息
+func (b *lastSeenMessageBuffer) Add(msg lastSeenMessage) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.messages[b.head] = msg
+	b.head = (b.head + 1) % 20
+	if b.count < 20 {
+		b.count++
+	}
+}
+
+// GetAll 返回所有消息（从最旧到最新）
+func (b *lastSeenMessageBuffer) GetAll() []lastSeenMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	result := make([]lastSeenMessage, b.count)
+	if b.count == 0 {
+		return result
+	}
+
+	// 从最旧的开始读取
+	start := (b.head - b.count + 20) % 20
+	for i := 0; i < b.count; i++ {
+		idx := (start + i) % 20
+		result[i] = b.messages[idx]
+	}
+	return result
+}
+
+// Len 返回当前存储的消息数量
+func (b *lastSeenMessageBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.count
 }
 
 func (c *Client) SetChatHandler(handler func(ChatMessage)) {
@@ -144,13 +198,27 @@ func (c *Client) SendMessage(message string) error {
 	}
 	timestamp := time.Now().UnixMilli()
 
-	signature, signErr := c.signChatBody(msg, timestamp, salt, nil)
+	// 获取已接收的带签名消息用于确认
+	ackMessages := c.lastSeenBuf.GetAll()
+	messageCount := int32(len(ackMessages))
+
+	// 构建 acknowledged bitset
+	var acknowledged [3]byte
+	ackSignatures := make([][]byte, len(ackMessages))
+	for i := 0; i < len(ackMessages) && i < 24; i++ {
+		byteIdx := i / 8
+		bitIdx := i % 8
+		acknowledged[byteIdx] |= (1 << bitIdx)
+		ackSignatures[i] = ackMessages[i].signature[:]
+	}
+
+	signature, signErr := c.signChatBody(msg, timestamp, salt, ackSignatures)
 	hasSignature := signErr == nil && len(signature) == 256
 	if signErr != nil {
 		logx.Debugf("聊天消息签名不可用，按无签名发送: %v", signErr)
 	}
 
-	payload := make([]byte, 0, len(msg)+64)
+	payload := make([]byte, 0, len(msg)+64+len(ackMessages)*256)
 	payload = append(payload, packet.EncodeString(msg)...)
 	payload = append(payload, packet.EncodeInt64(timestamp)...)
 	payload = append(payload, packet.EncodeInt64(salt)...)
@@ -158,8 +226,8 @@ func (c *Client) SendMessage(message string) error {
 	if hasSignature {
 		payload = append(payload, signature...)
 	}
-	payload = append(payload, packet.EncodeVarInt(0)...)
-	payload = append(payload, 0x00, 0x00, 0x00)
+	payload = append(payload, packet.EncodeVarInt(messageCount)...)
+	payload = append(payload, acknowledged[:]...)
 	payload = append(payload, 0x01)
 
 	if err := c.conn.WritePacket(protocol.PlayServerChatMessage, payload); err != nil {
@@ -415,12 +483,26 @@ func (c *Client) sendSignedCommand(cmd string) error {
 		return fmt.Errorf("生成命令签名 salt 失败: %w", err)
 	}
 
-	argSignatures, err := c.buildCommandArgumentSignatures(cmd, timestamp, salt)
+	// 获取已接收的带签名消息用于确认
+	ackMessages := c.lastSeenBuf.GetAll()
+	messageCount := int32(len(ackMessages))
+
+	// 构建 acknowledged bitset (24位，每个位表示对应消息是否已确认)
+	var acknowledged [3]byte
+	ackSignatures := make([][]byte, len(ackMessages))
+	for i := 0; i < len(ackMessages) && i < 24; i++ {
+		byteIdx := i / 8
+		bitIdx := i % 8
+		acknowledged[byteIdx] |= (1 << bitIdx)
+		ackSignatures[i] = ackMessages[i].signature[:]
+	}
+
+	argSignatures, err := c.buildCommandArgumentSignatures(cmd, timestamp, salt, ackSignatures)
 	if err != nil {
 		return err
 	}
 
-	payload := make([]byte, 0, len(cmd)+64)
+	payload := make([]byte, 0, len(cmd)+64+len(ackMessages)*256)
 	payload = append(payload, packet.EncodeString(cmd)...)
 	payload = append(payload, packet.EncodeInt64(timestamp)...)
 	payload = append(payload, packet.EncodeInt64(salt)...)
@@ -432,18 +514,18 @@ func (c *Client) sendSignedCommand(cmd string) error {
 		payload = append(payload, packet.EncodeString(sig.name)...)
 		payload = append(payload, sig.signature...)
 	}
-	payload = append(payload, packet.EncodeVarInt(0)...) // messageCount
-	payload = append(payload, 0x00, 0x00, 0x00)          // acknowledged (3 bytes)
-	payload = append(payload, 0x01)                      // checksum (u8, 1 when no seen signatures)
+	payload = append(payload, packet.EncodeVarInt(messageCount)...)
+	payload = append(payload, acknowledged[:]...)
+	payload = append(payload, 0x01) // checksum (u8, 1 when no seen signatures)
 
 	// 调试输出命令包详细信息
-	c.logCommandPacket(true, cmd, timestamp, salt, argSignatures, payload)
+	c.logCommandPacket(true, cmd, timestamp, salt, argSignatures, messageCount, acknowledged, payload)
 
 	return c.conn.WritePacket(protocol.PlayServerChatCommandSign, payload)
 }
 
 // logCommandPacket 输出命令包的详细调试信息
-func (c *Client) logCommandPacket(isSigned bool, cmd string, timestamp int64, salt int64, signatures []commandArgumentSignature, payload []byte) {
+func (c *Client) logCommandPacket(isSigned bool, cmd string, timestamp int64, salt int64, signatures []commandArgumentSignature, messageCount int32, acknowledged [3]byte, payload []byte) {
 	if isSigned {
 		logx.Debugf("[命令包] 发送签名命令:")
 		logx.Debugf("  命令: %s", cmd)
@@ -453,8 +535,8 @@ func (c *Client) logCommandPacket(isSigned bool, cmd string, timestamp int64, sa
 		for _, sig := range signatures {
 			logx.Debugf("    - %s: [%d bytes]", sig.name, len(sig.signature))
 		}
-		logx.Debugf("  消息计数: 0")
-		logx.Debugf("  确认位: 000000")
+		logx.Debugf("  消息计数: %d", messageCount)
+		logx.Debugf("  确认位: %02x%02x%02x", acknowledged[0], acknowledged[1], acknowledged[2])
 		logx.Debugf("  校验和: 1")
 		logx.Debugf("  完整包体 (hex): %s", formatHexDump(payload, 64))
 	} else {
@@ -465,7 +547,7 @@ func (c *Client) logCommandPacket(isSigned bool, cmd string, timestamp int64, sa
 	}
 }
 
-func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int64, salt int64) ([]commandArgumentSignature, error) {
+func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int64, salt int64, acknowledgements [][]byte) ([]commandArgumentSignature, error) {
 	verb, _ := splitCommand(cmd)
 	target, ok := c.commandSignTarget(verb)
 	if !ok {
@@ -481,7 +563,7 @@ func (c *Client) buildCommandArgumentSignatures(cmd string, timestampMillis int6
 		return nil, nil
 	}
 
-	sig, err := c.signChatBody(arg, timestampMillis, salt, nil)
+	sig, err := c.signChatBody(arg, timestampMillis, salt, acknowledgements)
 	if err != nil {
 		return nil, fmt.Errorf("生成命令参数签名失败: %w", err)
 	}

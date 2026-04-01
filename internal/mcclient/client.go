@@ -59,6 +59,10 @@ type Client struct {
 	commandSign   map[string]signableCommandTarget
 	chatSignMu    sync.Mutex
 
+	// 聊天状态同步
+	lastSeenBuf  lastSeenMessageBuffer // 最近接收的带签名消息（最多20条）
+	acknowledged [3]byte               // 24位 bitset，表示已确认的消息
+
 	Player    *player.Player
 	players   map[string]playerInfo
 	playersMu sync.RWMutex

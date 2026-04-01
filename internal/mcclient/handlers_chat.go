@@ -86,18 +86,30 @@ func (c *Client) handlePlayerChatPacket(data []byte) error {
 		return fmt.Errorf("解析 player_chat sender 失败: %w", err)
 	}
 
-	if _, err := packet.ReadVarInt(r); err != nil {
+	index, err := packet.ReadVarInt(r)
+	if err != nil {
 		return fmt.Errorf("解析 player_chat index 失败: %w", err)
 	}
 
+	var signature [256]byte
 	hasSignature, err := packet.ReadBool(r)
 	if err != nil {
 		return fmt.Errorf("解析 player_chat signature 标记失败: %w", err)
 	}
 	if hasSignature {
-		if err := packet.DiscardN(r, 256); err != nil {
-			return fmt.Errorf("跳过 player_chat signature 失败: %w", err)
+		sigBytes, err := packet.ReadBytes(r, 256)
+		if err != nil {
+			return fmt.Errorf("读取 player_chat signature 失败: %w", err)
 		}
+		copy(signature[:], sigBytes)
+
+		// 将消息加入 lastSeenMessages 缓冲区
+		c.lastSeenBuf.Add(lastSeenMessage{
+			signature:  signature,
+			senderUUID: sender,
+			index:      index,
+		})
+		logx.Debugf("[聊天状态] 已跟踪消息: sender=%x, index=%d, sig=%x...", sender[:4], index, signature[:4])
 	}
 
 	plain, err := packet.ReadString(r, r)
