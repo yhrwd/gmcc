@@ -3,14 +3,11 @@ package packet
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"gmcc/internal/constants"
 	"gmcc/internal/logx"
-	"gmcc/internal/nbt"
 )
 
 // SlotData 兼容类型定义（避免循环依赖）
@@ -24,7 +21,7 @@ type SlotData struct {
 func MustReadBytes(r io.Reader, n int, name string) []byte {
 	b, err := ReadBytes(r, n)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return b
 }
@@ -53,7 +50,7 @@ func (b *byteReaderWrapper) ReadByte() (byte, error) {
 func MustReadVarInt(r io.Reader, name string) int32 {
 	v, err := ReadVarIntFromReader(r)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return v
 }
@@ -62,7 +59,7 @@ func MustReadVarInt(r io.Reader, name string) int32 {
 func MustReadString(r io.Reader, name string) string {
 	s, err := ReadStringFromReader(r)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return s
 }
@@ -71,7 +68,7 @@ func MustReadString(r io.Reader, name string) string {
 func MustReadBool(r io.Reader, name string) bool {
 	v, err := ReadBool(r)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return v
 }
@@ -80,7 +77,7 @@ func MustReadBool(r io.Reader, name string) bool {
 func MustReadU8(r io.Reader, name string) byte {
 	v, err := ReadU8(r)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return v
 }
@@ -89,7 +86,7 @@ func MustReadU8(r io.Reader, name string) byte {
 func MustReadInt32(r io.Reader, name string) int32 {
 	v, err := ReadInt32(r)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return v
 }
@@ -98,7 +95,7 @@ func MustReadInt32(r io.Reader, name string) int32 {
 func MustReadFloat64(r io.Reader, name string) float64 {
 	v, err := ReadFloat64FromReader(r)
 	if err != nil {
-		logx.PacketWarn(name, err)
+		logx.Debugf("读取 %s 失败: %v", name, err)
 	}
 	return v
 }
@@ -1296,38 +1293,4 @@ func skipInt32List(r *bytes.Reader) error {
 		}
 	}
 	return nil
-}
-
-// SkipNBT 跳过 Network NBT 格式 (无 name 字段)
-func SkipNBT(r *bytes.Reader) error {
-	if r.Len() == 0 {
-		return nil
-	}
-	dec := nbt.NewDecoder(r).NetworkFormat(true)
-	err := dec.Skip()
-	if err != nil {
-		errMsg := err.Error()
-		if errMsg == "unexpected EOF" || strings.HasPrefix(errMsg, "unknown tag type: ") {
-			logx.Warnf("SkipNBT 警告: %v, 剩余 %d 字节", err, r.Len())
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// ReadAnonymousNBTJSON 解析 Network NBT 并返回 JSON 字符串
-func ReadAnonymousNBTJSON(r io.Reader) (string, error) {
-	dec := nbt.NewDecoder(r)
-	dec.NetworkFormat(true)
-	var v any
-	if err := dec.Decode(&v); err != nil {
-		return "", err
-	}
-
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
 }

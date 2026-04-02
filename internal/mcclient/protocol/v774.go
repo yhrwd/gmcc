@@ -104,6 +104,7 @@ const (
 	PlayServerResource         int32 = 0x30
 	PlayServerInteract         int32 = 0x19 // 0x19 (25) - interact - 右键点击实体
 	PlayServerSetCarriedItem   int32 = 0x34 // 0x34 (52) - set_carried_item - 切换快捷栏
+	PlayServerClientCommand    int32 = 0x0B // client_command - 客户端命令
 )
 
 // Interact action types

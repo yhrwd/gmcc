@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +17,7 @@ var (
 	debugEnabled  bool
 )
 
+// Init 初始化日志系统
 func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -39,168 +39,85 @@ func Init(logDir string, enableFile bool, maxSize int64, debug bool) error {
 	return nil
 }
 
+// Close 关闭日志系统
 func Close() error {
 	mu.Lock()
 	defer mu.Unlock()
 	return closeLocked()
 }
 
+// Infof 输出信息日志
 func Infof(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
+
+	now := time.Now().Format("15:04:05")
+	msg := fmt.Sprintf(format, args...)
+	consoleLogger.Printf("%s [INFO] %s", now, msg)
 	if fileLogger != nil {
-		fileLogger.Printf("[INFO] "+format, args...)
+		fileLogger.Printf("[INFO] %s", msg)
 	}
 }
 
+// Warnf 输出警告日志
 func Warnf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
+
+	now := time.Now().Format("15:04:05")
+	msg := fmt.Sprintf(format, args...)
+	consoleLogger.Printf("%s [WARN] %s", now, msg)
 	if fileLogger != nil {
-		fileLogger.Printf("[WARN] "+format, args...)
+		fileLogger.Printf("[WARN] %s", msg)
 	}
 }
 
+// Errorf 输出错误日志
 func Errorf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
-	if fileLogger != nil {
-		fileLogger.Printf("[ERROR] "+format, args...)
-	}
-}
-
-// LogTokenCache 记录token缓存状态
-func LogTokenCache(tokenType string, profileName string, profileID string) {
-	mu.Lock()
-	defer mu.Unlock()
-	template := "[INFO] 使用缓存的 %s token"
-	args := []interface{}{tokenType}
-
-	if profileName != "" || profileID != "" {
-		template += ": %s (%s)"
-		args = append(args, profileName, profileID)
-	}
 
 	now := time.Now().Format("15:04:05")
-	consoleLogger.Printf("%s "+template, append([]interface{}{now}, args...)...)
+	msg := fmt.Sprintf(format, args...)
+	consoleLogger.Printf("%s [ERROR] %s", now, msg)
 	if fileLogger != nil {
-		fileLogger.Printf(template, args...)
+		fileLogger.Printf("[ERROR] %s", msg)
 	}
 }
 
-// LogTokenExpired 记录token过期状态
-func LogTokenExpired(tokenType string, err error) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	now := time.Now().Format("15:04:05")
-	if err != nil {
-		template := "缓存 %s token 已失效，将尝试 refresh_token: %v"
-		consoleLogger.Printf("%s [WARN] "+template, now, tokenType, err)
-		if fileLogger != nil {
-			fileLogger.Printf("[WARN] "+template, tokenType, err)
-		}
-	} else {
-		template := "缓存 %s token 已失效"
-		consoleLogger.Printf("%s [WARN] "+template, now, tokenType)
-		if fileLogger != nil {
-			fileLogger.Printf("[WARN] "+template, tokenType)
-		}
-	}
-}
-
+// Debugf 输出调试日志（仅在debug模式）
 func Debugf(format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
 	if debugEnabled {
 		now := time.Now().Format("15:04:05")
-		consoleLogger.Printf("%s [DEBUG] %s", now, fmt.Sprintf(format, args...))
+		msg := fmt.Sprintf(format, args...)
+		consoleLogger.Printf("%s [DEBUG] %s", now, msg)
 		if fileLogger != nil {
-			fileLogger.Printf("[DEBUG] "+format, args...)
+			fileLogger.Printf("[DEBUG] %s", msg)
 		}
 	}
 }
 
-func PacketLogf(format string, args ...interface{}) {
-}
+// PacketLogf 数据包日志（空实现）
+func PacketLogf(format string, args ...interface{}) {}
 
-func PacketWarn(packetName string, err error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if debugEnabled || fileLogger != nil {
-		now := time.Now().Format("15:04:05")
-		consoleLogger.Printf("%s [WARN] Packet解析警告: %s: %v", now, packetName, err)
-		if fileLogger != nil {
-			fileLogger.Printf("[WARN] Packet解析警告: %s: %v", packetName, err)
-		}
-	}
-}
-
-func PacketError(packetName string, data []byte, err error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if fileLogger != nil {
-		now := time.Now()
-		consoleLogger.Printf("%s [ERROR] Packet解析失败: %s: %v, len=%d", now.Format("15:04:05"), packetName, err, len(data))
-		fileLogger.Printf("[ERROR] Packet解析失败: %s: %v, len=%d", packetName, err, len(data))
-	}
-	if len(data) > 0 {
-		savePacketDump(packetName, data, err)
-	}
-}
-
-// PacketErrorWithContext 记录带有上下文信息的数据包错误
-func PacketErrorWithContext(packetName string, data []byte, err error, context string) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	var errMsg string
-	if context != "" {
-		if err != nil {
-			errMsg = fmt.Sprintf("%s: %v", context, err)
-		} else {
-			errMsg = context
-		}
+// LogTokenCache 记录token缓存状态
+func LogTokenCache(tokenType string, profileName string, profileID string) {
+	if profileName != "" {
+		Infof("使用缓存的 %s token: %s (%s)", tokenType, profileName, profileID)
 	} else {
-		if err != nil {
-			errMsg = err.Error()
-		} else {
-			errMsg = "未知错误"
-		}
-	}
-
-	now := time.Now()
-	consoleLogger.Printf("%s [ERROR] Packet解析失败: %s: %v, len=%d", now.Format("15:04:05"), packetName, errMsg, len(data))
-	if fileLogger != nil {
-		fileLogger.Printf("[ERROR] Packet解析失败: %s: %v, len=%d", packetName, errMsg, len(data))
-	}
-
-	if len(data) > 0 {
-		savePacketDump(packetName, data, err)
+		Infof("使用缓存的 %s token", tokenType)
 	}
 }
 
-func savePacketDump(packetName string, data []byte, err error) {
-	if fileWriter == nil {
-		return
-	}
-	dumpDir := filepath.Join(filepath.Dir(fileWriter.activePath), "errors")
-	if err := os.MkdirAll(dumpDir, 0o755); err != nil {
-		return
-	}
-	timestamp := time.Now().Format("20060102-150405")
-	safeName := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_").Replace(packetName)
-	filename := fmt.Sprintf("%s_%s.bin", timestamp, safeName)
-	path := filepath.Join(dumpDir, filename)
-
-	f, err := os.Create(path)
+// LogTokenExpired 记录token过期状态
+func LogTokenExpired(tokenType string, err error) {
 	if err != nil {
-		return
+		Warnf("缓存 %s token 已失效: %v", tokenType, err)
+	} else {
+		Warnf("缓存 %s token 已失效", tokenType)
 	}
-	defer f.Close()
-
-	// 直接写入原始二进制数据，不添加任何头部信息
-	f.Write(data)
 }
 
 func closeLocked() error {
@@ -326,13 +243,6 @@ func (w *rotatingFileWriter) rotateActiveFileLocked() error {
 
 	base := "gmcc-" + time.Now().Format("20060102-150405")
 	target := filepath.Join(w.logDir, base+".log")
-	for i := 1; ; i++ {
-		if _, err := os.Stat(target); os.IsNotExist(err) {
-			break
-		}
-		target = filepath.Join(w.logDir, fmt.Sprintf("%s-%03d.log", base, i))
-	}
-
 	if err := os.Rename(w.activePath, target); err != nil {
 		return fmt.Errorf("滚动日志文件失败: %w", err)
 	}

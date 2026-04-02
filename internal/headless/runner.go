@@ -10,7 +10,6 @@ import (
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient"
-	"gmcc/internal/mcclient/chat"
 )
 
 // Runner 无界面运行器
@@ -34,22 +33,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	logx.Infof("正在连接...")
 
 	r.client = mcclient.New(r.cfg)
-	r.client.SetChatHandler(func(msg mcclient.ChatMessage) {
-		var text string
-		if msg.RawJSON != "" {
-			comp, err := chat.ParseTextComponent(msg.RawJSON)
-			if err == nil {
-				text = comp.ToANSI()
-			} else {
-				text = msg.PlainText
-			}
-		} else {
-			text = msg.PlainText
-		}
-		if text != "" {
-			logx.Infof("[聊天] %s", text)
-		}
-	})
 
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -74,7 +57,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-// SendCommand 发送命令（使用配置的默认签名行为）
+// SendCommand 发送命令
 func (r *Runner) SendCommand(cmd string) error {
 	if r.client == nil || !r.client.IsReady() {
 		return fmt.Errorf("客户端未就绪")
@@ -82,28 +65,12 @@ func (r *Runner) SendCommand(cmd string) error {
 	return r.client.SendCommand(cmd)
 }
 
-// SendCommandSigned 发送签名命令
-func (r *Runner) SendCommandSigned(cmd string) error {
-	if r.client == nil || !r.client.IsReady() {
-		return fmt.Errorf("客户端未就绪")
+// GetPlayer 获取玩家状态
+func (r *Runner) GetPlayer() *mcclient.Player {
+	if r.client == nil {
+		return nil
 	}
-	return r.client.SendCommandSigned(cmd)
-}
-
-// SendCommandUnsigned 发送无签名命令
-func (r *Runner) SendCommandUnsigned(cmd string) error {
-	if r.client == nil || !r.client.IsReady() {
-		return fmt.Errorf("客户端未就绪")
-	}
-	return r.client.SendCommandUnsigned(cmd)
-}
-
-// SendMessage 发送消息
-func (r *Runner) SendMessage(msg string) error {
-	if r.client == nil || !r.client.IsReady() {
-		return fmt.Errorf("客户端未就绪")
-	}
-	return r.client.SendMessage(msg)
+	return r.client.Player
 }
 
 // IsReady 检查客户端是否就绪
