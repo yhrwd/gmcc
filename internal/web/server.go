@@ -18,7 +18,6 @@ import (
 	"gmcc/internal/web/key"
 	"gmcc/internal/web/vault"
 	"gmcc/internal/webtypes"
-	"gmcc/internal/webui"
 )
 
 // Server Web服务器
@@ -132,21 +131,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/logs/operations", s.passwordAuthMiddleware(), s.handleGetOperationLogs)
 	}
 
-	// 静态文件服务 - 使用嵌入的文件系统
-	s.router.StaticFS("/assets", http.FS(webui.Assets))
-
-	// 根路径返回 index.html
-	s.router.GET("/", func(c *gin.Context) {
-		data, err := webui.Assets.ReadFile("index.html")
-		if err != nil {
-			c.String(500, "Internal Error")
-			return
-		}
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(200, string(data))
-	})
-
-	// 处理其他未匹配路由（SPA fallback）- 但排除静态文件路径
+	// API 模式 - 只提供 API 服务，不提供前端静态文件
 	s.router.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
@@ -165,9 +150,8 @@ func (s *Server) setupRoutes() {
 			return
 		}
 
-		// 其他路径返回 index.html（SPA fallback）
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.FileFromFS("/index.html", http.FS(webui.Assets))
+		// API 模式 - 只返回 JSON 错误
+		c.JSON(404, gin.H{"error": "API endpoint not found"})
 	})
 }
 
