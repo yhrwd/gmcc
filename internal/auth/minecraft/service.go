@@ -81,6 +81,27 @@ func GetMinecraftToken(xstsResp *microsoft.XSTSResponse) (*MinecraftTokenRespons
 	return &resp, nil
 }
 
+func GetMinecraftTokenFromClaims(token, userHash string) (*MinecraftTokenResponse, error) {
+	trimmedToken := strings.TrimSpace(token)
+	trimmedUserHash := strings.TrimSpace(userHash)
+	if trimmedToken == "" || trimmedUserHash == "" {
+		return nil, fmt.Errorf("无效的 XSTS 凭据")
+	}
+
+	return GetMinecraftToken(&microsoft.XSTSResponse{
+		Token: trimmedToken,
+		DisplayClaims: struct {
+			Xui []struct {
+				Uhs string `json:"uhs"`
+			} `json:"xui"`
+		}{
+			Xui: []struct {
+				Uhs string `json:"uhs"`
+			}{{Uhs: trimmedUserHash}},
+		},
+	})
+}
+
 func VerifyGameOwnership(minecraftToken string) error {
 	var resp MinecraftEntitlementResponse
 	_, err := httpx.GetWithAuthHeader(

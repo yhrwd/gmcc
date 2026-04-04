@@ -316,6 +316,17 @@ func GetMicrosoftToken() (*TokenResponse, error) {
 	return getMicrosoftToken()
 }
 
+func BeginDeviceCodeLogin() (*DeviceCodeResponse, error) {
+	return getDeviceCode(MICROSOFT_CLIENT_ID)
+}
+
+func PollDeviceCodeLogin(deviceCode *DeviceCodeResponse) (*TokenResponse, error) {
+	if deviceCode == nil {
+		return nil, fmt.Errorf("device code response is nil")
+	}
+	return pollDeviceCodeToken(MICROSOFT_CLIENT_ID, deviceCode)
+}
+
 func RefreshMicrosoftToken(refreshToken string) (*TokenResponse, error) {
 	return refreshMSToken(refreshToken)
 }
