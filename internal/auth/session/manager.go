@@ -128,6 +128,11 @@ func (m *AuthManager) refreshSession(ctx context.Context, accountID string, cach
 		return AuthSession{}, normalizeProviderError(err)
 	}
 
+	return m.completeSessionFromMicrosoft(ctx, accountID, msCache, AuthSourceRefresh)
+}
+
+func (m *AuthManager) completeSessionFromMicrosoft(ctx context.Context, accountID string, msCache MicrosoftTokenCache, source AuthSource) (AuthSession, error) {
+
 	xsts, err := m.provider.GetXSTSFromMicrosoft(ctx, msCache.AccessToken)
 	if err != nil {
 		return AuthSession{}, normalizeProviderError(err)
@@ -161,22 +166,40 @@ func (m *AuthManager) refreshSession(ctx context.Context, accountID string, cach
 		return AuthSession{}, fmt.Errorf("save refreshed account token cache: %w", err)
 	}
 
-	return next.ToAuthSession(AuthSourceRefresh), nil
+	return next.ToAuthSession(source), nil
 }
 
 func (m *AuthManager) BeginDeviceLogin(ctx context.Context, accountID string) (DeviceLoginInfo, error) {
-	info, err := m.provider.BeginDeviceLogin(ctx, accountID)
+	trimmedAccountID := strings.TrimSpace(accountID)
+	info, err := m.provider.BeginDeviceLogin(ctx, trimmedAccountID)
 	if err != nil {
 		return DeviceLoginInfo{}, normalizeProviderError(err)
 	}
+	if strings.TrimSpace(info.AccountID) == "" {
+		info.AccountID = trimmedAccountID
+	}
+	if info.PollInterval <= 0 {
+		info.PollInterval = 2 * time.Second
+	}
+
+	pollCtx, cancel := context.WithCancel(context.Background())
 
 	flow := &deviceLoginFlow{
 		info:   info,
 		status: DeviceLoginStatusPending,
+		cancel: cancel,
 	}
+
 	m.mu.Lock()
-	m.device[strings.TrimSpace(accountID)] = flow
+	previous := m.device[trimmedAccountID]
+	m.device[trimmedAccountID] = flow
 	m.mu.Unlock()
+
+	if previous != nil && previous.cancel != nil {
+		previous.cancel()
+	}
+
+	go m.pollDeviceLogin(pollCtx, trimmedAccountID, flow)
 
 	return info, nil
 }
@@ -194,19 +217,136 @@ func (m *AuthManager) GetDeviceLoginStatus(accountID string) (DeviceLoginStatus,
 }
 
 func (m *AuthManager) CancelDeviceLogin(accountID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	trimmedAccountID := strings.TrimSpace(accountID)
 
-	flow, ok := m.device[strings.TrimSpace(accountID)]
+	m.mu.Lock()
+	flow, ok := m.device[trimmedAccountID]
 	if !ok {
+		m.mu.Unlock()
 		return nil
-	}
-	if flow.cancel != nil {
-		flow.cancel()
 	}
 	flow.status = DeviceLoginStatusCancelled
 	flow.err = ErrDeviceLoginRequired
+	cancel := flow.cancel
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
 	return nil
+}
+
+func (m *AuthManager) pollDeviceLogin(ctx context.Context, accountID string, flow *deviceLoginFlow) {
+	ticker := time.NewTicker(flow.info.PollInterval)
+	defer ticker.Stop()
+
+	for {
+		if deviceLoginExpired(flow.info.ExpiresAt) {
+			m.finishDeviceFlowExpired(accountID, flow)
+			return
+		}
+
+		msCache, err := m.provider.PollDeviceLogin(ctx, accountID, flow.info)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			if isDeviceLoginPending(err) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					continue
+				}
+			}
+			if isDeviceLoginExpiredError(err) {
+				m.finishDeviceFlowExpired(accountID, flow)
+				return
+			}
+			m.finishDeviceFlowFailed(accountID, flow, normalizeProviderError(err))
+			return
+		}
+
+		session, completeErr := m.completeSessionFromMicrosoft(ctx, accountID, msCache, AuthSourceDeviceLogin)
+		if completeErr != nil {
+			if errors.Is(completeErr, ErrDeviceLoginRequired) {
+				m.finishDeviceFlowExpired(accountID, flow)
+				return
+			}
+			m.finishDeviceFlowFailed(accountID, flow, completeErr)
+			return
+		}
+
+		m.finishDeviceFlowSucceeded(accountID, flow, session)
+		return
+	}
+}
+
+func (m *AuthManager) finishDeviceFlowSucceeded(accountID string, flow *deviceLoginFlow, session AuthSession) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	current, ok := m.device[accountID]
+	if !ok || current != flow {
+		return
+	}
+
+	snapshot := session
+	current.status = DeviceLoginStatusSucceeded
+	current.session = &snapshot
+	current.err = nil
+}
+
+func (m *AuthManager) finishDeviceFlowExpired(accountID string, flow *deviceLoginFlow) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	current, ok := m.device[accountID]
+	if !ok || current != flow {
+		return
+	}
+
+	current.status = DeviceLoginStatusExpired
+	current.session = nil
+	current.err = ErrDeviceLoginRequired
+}
+
+func (m *AuthManager) finishDeviceFlowFailed(accountID string, flow *deviceLoginFlow, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	current, ok := m.device[accountID]
+	if !ok || current != flow {
+		return
+	}
+
+	current.status = DeviceLoginStatusFailed
+	current.session = nil
+	current.err = err
+}
+
+func deviceLoginExpired(expiresAt time.Time) bool {
+	if expiresAt.IsZero() {
+		return false
+	}
+	return !time.Now().UTC().Before(expiresAt)
+}
+
+func isDeviceLoginPending(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "authorization_pending") || strings.Contains(msg, "authorization pending") || strings.Contains(msg, "slow_down") || strings.Contains(msg, "slow down")
+}
+
+func isDeviceLoginExpiredError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "expired_token") || strings.Contains(msg, "expired token") || strings.Contains(msg, "expired")
 }
 
 func normalizeProviderError(err error) error {
