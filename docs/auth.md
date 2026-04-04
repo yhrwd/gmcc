@@ -245,8 +245,15 @@ type TokenCache struct {
 ### 缓存文件位置
 
 ```
-.session/<玩家ID>.json
+.session/<account_id>.json
 ```
+
+## 集群认证补充
+
+- 正版认证 token 缓存按 `account_id` 持有，不再按 `player_id` 作为官方认证缓存主键。
+- 同账号并发实例共享认证会话，刷新流程由 `AuthManager` 单飞协调。
+- `refresh_token` 失效或需要设备码重新登录时，实例进入 `auth_failed`，不会触发自动网络重连。
+- 真实微软登录仅作为手工联调项；默认自动化验证使用 fake provider。
 
 ### 缓存验证
 

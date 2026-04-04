@@ -14,25 +14,26 @@ type MinecraftTokenCache = authsession.MinecraftTokenCache
 
 type TokenCache = authsession.TokenCache
 
-// Deprecated: use internal/auth/session.NewTokenCache with account-scoped IDs.
-func New(playerID string) *TokenCache {
-	return authsession.NewTokenCache(playerID)
+// Deprecated: official-auth cache ownership moved to internal/auth/session.
+// Use internal/auth/session.NewTokenCache with account-scoped accountID.
+func New(accountID string) *TokenCache {
+	return authsession.NewTokenCache(accountID)
 }
 
-// Deprecated: use internal/auth/session.TokenStore.Path with account-scoped IDs.
-func Path(playerID string) string {
+// Deprecated: use internal/auth/session.TokenStore.Path with account-scoped accountID.
+func Path(accountID string) string {
 	store := authsession.NewTokenStore(sessionDir)
-	return store.Path(playerID)
+	return store.Path(accountID)
 }
 
-// Deprecated: use internal/auth/session.TokenStore.Load with account-scoped IDs.
-func Load(playerID string) (*TokenCache, error) {
+// Deprecated: use internal/auth/session.TokenStore.Load with account-scoped accountID.
+func Load(accountID string) (*TokenCache, error) {
 	store := authsession.NewTokenStore(sessionDir)
-	return store.Load(playerID)
+	return store.Load(accountID)
 }
 
-// Deprecated: use internal/auth/session.TokenStore.Save with account-scoped IDs.
-func Save(playerID string, cache *TokenCache) error {
+// Deprecated: use internal/auth/session.TokenStore.Save with account-scoped accountID.
+func Save(accountID string, cache *TokenCache) error {
 	store := authsession.NewTokenStore(sessionDir)
-	return store.Save(playerID, cache)
+	return store.Save(accountID, cache)
 }
