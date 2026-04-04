@@ -282,13 +282,17 @@ func (m *Manager) handleInstanceStopped(id string, err error) {
 	logx.Debugf("实例已停止: %s, err=%v", id, err)
 
 	// 这里可以触发重连逻辑
-	inst, err := m.GetInstance(id)
-	if err != nil {
+	inst, getErr := m.GetInstance(id)
+	if getErr != nil {
 		return
 	}
 
 	// 检查是否需要自动重连
 	if m.config.Global.ReconnectPolicy.Enabled {
+		if classifyExitCategory(err) != ExitCategoryNetworkDisconnect {
+			return
+		}
+
 		if !m.beginSupervision(inst.ID) {
 			logx.Debugf("实例 %s 已在重连监督中，忽略重复触发", inst.ID)
 			return

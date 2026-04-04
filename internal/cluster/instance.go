@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"gmcc/internal/config"
-	"gmcc/internal/headless"
 	"gmcc/internal/logx"
 )
 
@@ -64,7 +63,7 @@ type Instance struct {
 	exitCh         chan struct{}
 
 	// 运行时
-	runner  *headless.Runner
+	runner  runner
 	cancel  context.CancelFunc
 	errChan chan error
 
@@ -72,17 +71,19 @@ type Instance struct {
 	manager *Manager
 
 	startRunnerFn func(runVersion uint64) error
+	runnerFactory runnerFactory
 }
 
 // newInstance 创建新实例（内部使用）
 func newInstance(id string, account AccountEntry, manager *Manager) *Instance {
 	return &Instance{
-		ID:      id,
-		Account: account,
-		status:  StatusPending,
-		errChan: make(chan error, 1),
-		exitCh:  make(chan struct{}, 1),
-		manager: manager,
+		ID:            id,
+		Account:       account,
+		status:        StatusPending,
+		errChan:       make(chan error, 1),
+		exitCh:        make(chan struct{}, 1),
+		manager:       manager,
+		runnerFactory: defaultRunnerFactory,
 	}
 }
 
@@ -149,7 +150,11 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 	}
 
 	// 创建runner
-	i.runner = headless.New(cfg)
+	factory := i.runnerFactory
+	if factory == nil {
+		factory = defaultRunnerFactory
+	}
+	i.runner = factory(cfg)
 
 	// 创建上下文
 	ctx, cancel := context.WithCancel(context.Background())
@@ -166,10 +171,7 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 		}
 		i.errChan <- err
 
-		category := ExitCategoryUnknown
-		if err == nil {
-			category = ExitCategoryManualStop
-		}
+		category := classifyExitCategory(err)
 		handled := i.applyExitEvent(runVersion, category, err)
 		if handled {
 			i.signalExit()
