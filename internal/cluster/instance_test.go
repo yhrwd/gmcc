@@ -1,35 +1,49 @@
 package cluster
 
 import (
-	"reflect"
 	"testing"
 )
 
 func TestInstance_StartTriggerRules(t *testing.T) {
-	inst := newInstance("i1", AccountEntry{ID: "i1", PlayerID: "p1"}, nil)
-	method, ok := reflect.TypeOf(inst).MethodByName("StartWithTrigger")
-	if !ok {
-		t.Fatalf("missing symbol: (*Instance).StartWithTrigger")
+	tests := []struct {
+		name      string
+		status    InstanceStatus
+		trigger   StartTrigger
+		wantError bool
+	}{
+		{"manual from stopped", StatusStopped, StartTriggerManualStart, false},
+		{"manual from reconnecting denied", StatusReconnecting, StartTriggerManualStart, true},
+		{"auto reconnect from reconnecting allowed", StatusReconnecting, StartTriggerAutoReconnect, false},
 	}
 
-	if method.Type.NumIn() != 2 {
-		t.Fatalf("StartWithTrigger should accept trigger argument, got %d args", method.Type.NumIn()-1)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inst := newInstance("i1", AccountEntry{ID: "i1", PlayerID: "p1"}, nil)
+			inst.status = tt.status
+			inst.startRunnerFn = func(_ int64) error {
+				return nil
+			}
 
-	t.Fatalf("pending behavior test: start trigger rules should be enforced")
+			err := inst.StartWithTrigger(tt.trigger)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("wantError=%v, err=%v", tt.wantError, err)
+			}
+		})
+	}
 }
 
 func TestInstance_RejectsStaleVersionEvent(t *testing.T) {
 	inst := newInstance("i1", AccountEntry{ID: "i1", PlayerID: "p1"}, nil)
-	instType := reflect.TypeOf(inst)
+	inst.version = 7
+	inst.runVersion = 7
+	inst.status = StatusRunning
 
-	if _, ok := instType.Elem().FieldByName("version"); !ok {
-		t.Fatalf("missing symbol: Instance.version")
+	changed := inst.applyExitEvent(6, ExitCategoryNetworkDisconnect, errFakeNetworkEOF)
+	if changed {
+		t.Fatalf("expected stale event not to mutate state")
 	}
 
-	if _, ok := instType.MethodByName("applyExitEvent"); !ok {
-		t.Fatalf("missing symbol: (*Instance).applyExitEvent")
+	if got := inst.GetStatus(); got != StatusRunning {
+		t.Fatalf("expected status to remain running, got %s", got)
 	}
-
-	t.Fatalf("pending behavior test: stale version exit event must be ignored")
 }

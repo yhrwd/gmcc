@@ -58,6 +58,8 @@ type Instance struct {
 	lastActive     time.Time
 	reconnectCount int
 	errorMsg       string
+	version        int64
+	runVersion     int64
 
 	// 运行时
 	runner  *headless.Runner
@@ -66,6 +68,8 @@ type Instance struct {
 
 	// 父级管理器
 	manager *Manager
+
+	startRunnerFn func(runVersion int64) error
 }
 
 // newInstance 创建新实例（内部使用）
@@ -81,24 +85,47 @@ func newInstance(id string, account AccountEntry, manager *Manager) *Instance {
 
 // Start 启动实例
 func (i *Instance) Start() error {
+	return i.StartWithTrigger(StartTriggerManualStart)
+}
+
+// StartWithTrigger 按触发类型启动实例
+func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	// 检查当前状态
-	if i.status == StatusRunning || i.status == StatusStarting {
-		return fmt.Errorf("instance %s is already running", i.ID)
+	switch i.status {
+	case StatusStarting, StatusRunning:
+		return ErrInstanceRunningLike
+	case StatusReconnecting:
+		if trigger != StartTriggerAutoReconnect {
+			return ErrInstanceRunningLike
+		}
 	}
 
-	if i.status == StatusReconnecting {
-		return fmt.Errorf("instance %s is reconnecting", i.ID)
-	}
-
-	// 重置状态
 	i.errorMsg = ""
-	if i.status != StatusReconnecting {
-		// 非重连情况下才重置重连计数
+	if trigger != StartTriggerAutoReconnect {
 		i.reconnectCount = 0
 	}
+	i.version++
+	i.runVersion = i.version
+
+	if err := i.transitionToLocked(StatusStarting, ""); err != nil {
+		return err
+	}
+
+	if i.startRunnerFn != nil {
+		return i.startRunnerFn(i.runVersion)
+	}
+
+	if err := i.startRunnerLocked(i.runVersion); err != nil {
+		_ = i.transitionToLocked(StatusError, err.Error())
+		return err
+	}
+
+	return nil
+}
+
+func (i *Instance) startRunnerLocked(runVersion int64) error {
 
 	// 创建配置
 	cfg := &config.Config{
@@ -126,7 +153,6 @@ func (i *Instance) Start() error {
 	i.errChan = make(chan error, 1)
 
 	// 启动goroutine运行实例
-	i.status = StatusStarting
 	i.startTime = time.Now()
 
 	go func() {
@@ -136,17 +162,11 @@ func (i *Instance) Start() error {
 		}
 		i.errChan <- err
 
-		// 更新状态
-		i.mu.Lock()
-		if i.status != StatusStopped {
-			if err != nil {
-				i.status = StatusError
-				i.errorMsg = err.Error()
-			} else {
-				i.status = StatusStopped
-			}
+		category := ExitCategoryUnknown
+		if err == nil {
+			category = ExitCategoryManualStop
 		}
-		i.mu.Unlock()
+		i.applyExitEvent(runVersion, category, err)
 
 		// 通知管理器
 		if i.manager != nil {
@@ -175,7 +195,7 @@ func (i *Instance) Stop() error {
 		i.cancel = nil
 	}
 
-	i.status = StatusStopped
+	_ = i.transitionToLocked(StatusStopped, "")
 	logx.Infof("实例 %s 已停止", i.ID)
 	return nil
 }
@@ -279,7 +299,10 @@ func (i *Instance) waitForReady() {
 				i.mu.Unlock()
 				return
 			}
-			i.status = StatusRunning
+			if err := i.transitionToLocked(StatusRunning, ""); err != nil {
+				i.mu.Unlock()
+				return
+			}
 			i.reconnectCount = 0 // 成功后重置重连计数
 			i.mu.Unlock()
 			logx.Infof("实例 %s 已就绪", i.ID)
@@ -291,11 +314,54 @@ func (i *Instance) waitForReady() {
 	// 超时
 	i.mu.Lock()
 	if i.status == StatusStarting || i.status == StatusReconnecting {
-		i.status = StatusError
-		i.errorMsg = "timeout waiting for ready"
+		_ = i.transitionToLocked(StatusError, "timeout waiting for ready")
 	}
 	i.mu.Unlock()
 	logx.Warnf("实例 %s 启动超时", i.ID)
+}
+
+func (i *Instance) transitionToLocked(next InstanceStatus, reason string) error {
+	if !canTransition(i.status, next) {
+		return ErrInvalidTransition
+	}
+
+	i.status = next
+	i.lastActive = time.Now()
+	if reason != "" {
+		i.errorMsg = reason
+	}
+
+	return nil
+}
+
+func (i *Instance) applyExitEvent(runVersion int64, category ExitCategory, err error) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if runVersion != i.runVersion {
+		return false
+	}
+
+	if i.status == StatusStopped {
+		return false
+	}
+
+	next := StatusStopped
+	reason := ""
+	if err != nil {
+		next = StatusError
+		reason = err.Error()
+	}
+	if category == ExitCategoryManualStop {
+		next = StatusStopped
+		reason = ""
+	}
+
+	if transitionErr := i.transitionToLocked(next, reason); transitionErr != nil {
+		return false
+	}
+
+	return true
 }
 
 // updateLastActive 更新最后活动时间
