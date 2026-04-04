@@ -307,11 +307,10 @@ func (m *Manager) handleReconnect(inst *Instance) {
 
 	policy := m.config.Global.ReconnectPolicy
 
-	// 增加重连计数
+	// 首次进入重连态并记录尝试次数
 	inst.mu.Lock()
-	inst.reconnectCount++
-	attempt := inst.reconnectCount - 1 // 本次尝试的索引（从0开始）
-	inst.status = StatusReconnecting
+	_ = inst.transitionToLocked(StatusReconnecting, "network disconnect")
+	attempt := inst.bumpReconnectAttemptsLocked() - 1 // 本次尝试的索引（从0开始）
 	inst.mu.Unlock()
 
 	for attempt < policy.MaxRetries || policy.MaxRetries == 0 {
@@ -337,14 +336,11 @@ func (m *Manager) handleReconnect(inst *Instance) {
 		// 尝试启动（仅自动重连触发）
 		if err := inst.StartWithTrigger(StartTriggerAutoReconnect); err == nil {
 			logx.Infof("实例 %s 重连成功", inst.ID)
+			inst.resetReconnectAttempts()
 			return
 		} else {
 			logx.Warnf("实例 %s 重连失败: %v", inst.ID, err)
-			// 增加重连计数
-			inst.mu.Lock()
-			inst.reconnectCount++
-			attempt = inst.reconnectCount - 1
-			inst.mu.Unlock()
+			attempt = inst.bumpReconnectAttempts() - 1
 		}
 	}
 

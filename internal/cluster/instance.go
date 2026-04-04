@@ -108,7 +108,7 @@ func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 
 	i.errorMsg = ""
 	if trigger != StartTriggerAutoReconnect {
-		i.reconnectCount = 0
+		i.resetReconnectAttemptsLocked()
 	}
 	i.version++
 	i.runVersion = i.version
@@ -312,7 +312,7 @@ func (i *Instance) waitForReady() {
 				i.mu.Unlock()
 				return
 			}
-			i.reconnectCount = 0 // 成功后重置重连计数
+			i.resetReconnectAttemptsLocked() // 成功后重置重连计数
 			i.mu.Unlock()
 			logx.Infof("实例 %s 已就绪", i.ID)
 			return
@@ -394,6 +394,27 @@ func (i *Instance) markError(msg string) {
 	i.errorMsg = msg
 	i.lastActive = time.Now()
 	i.mu.Unlock()
+}
+
+func (i *Instance) bumpReconnectAttempts() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.bumpReconnectAttemptsLocked()
+}
+
+func (i *Instance) bumpReconnectAttemptsLocked() int {
+	i.reconnectCount++
+	return i.reconnectCount
+}
+
+func (i *Instance) resetReconnectAttempts() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.resetReconnectAttemptsLocked()
+}
+
+func (i *Instance) resetReconnectAttemptsLocked() {
+	i.reconnectCount = 0
 }
 
 // updateLastActive 更新最后活动时间
