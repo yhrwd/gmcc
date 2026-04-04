@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/cluster"
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
@@ -54,7 +55,12 @@ func main() {
 		Accounts: convertAccounts(cfg.Cluster.Accounts),
 	}
 
-	clusterManager := cluster.NewManager(clusterCfg, configPath)
+	authManager := authsession.NewAuthManager(
+		authsession.NewTokenStore(".session"),
+		authsession.NewLiveProviderSet(),
+	)
+
+	clusterManager := cluster.NewManager(clusterCfg, authManager, configPath)
 	if err := clusterManager.Start(); err != nil {
 		logx.Errorf("集群管理器启动失败: %v", err)
 		os.Exit(1)

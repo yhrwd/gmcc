@@ -16,14 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"gmcc/internal/auth/microsoft"
 	mcauth "gmcc/internal/auth/minecraft"
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/config"
 	"gmcc/internal/constants"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient/packet"
 	"gmcc/internal/mcclient/protocol"
-	"gmcc/internal/session"
 )
 
 var errOnlineAuthRequired = errors.New("online auth required")
@@ -181,6 +180,9 @@ type Client struct {
 	lastAFKPacket time.Time
 
 	Player *Player
+
+	accountID   string
+	authManager *authsession.AuthManager
 }
 
 func New(cfg *config.Config) *Client {
@@ -192,6 +194,8 @@ func New(cfg *config.Config) *Client {
 		username:    name,
 		uuid:        packet.OfflineUUID(name),
 		Player:      NewPlayer(),
+		accountID:   strings.TrimSpace(cfg.ClusterRuntime.AccountID),
+		authManager: cfg.ClusterRuntime.AuthManager,
 	}
 }
 
@@ -350,99 +354,21 @@ func (c *Client) sendAFKHeartbeatIfNeeded() error {
 }
 
 func (c *Client) prepareOnlineSession() error {
-	cache, err := session.Load(c.offlineName)
+	if c.authManager == nil {
+		return fmt.Errorf("auth manager 未配置")
+	}
+	if c.accountID == "" {
+		return fmt.Errorf("cluster.account_id 不能为空")
+	}
+	authSession, err := c.authManager.GetSession(context.Background(), c.accountID)
 	if err != nil {
+		return fmt.Errorf("获取账号认证会话失败: %w", err)
+	}
+	if err := c.setOnlineSession(authSession.MinecraftAccessToken, authSession.ProfileID, authSession.ProfileName); err != nil {
 		return err
 	}
-
-	now := time.Now()
-	if cache.HasValidMinecraftToken(now) {
-		if err := c.setOnlineSession(
-			cache.Minecraft.AccessToken,
-			cache.Minecraft.ProfileID,
-			cache.Minecraft.ProfileName,
-		); err == nil {
-			logx.LogTokenCache("minecraft", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
-			return nil
-		}
-		logx.Warnf("检测 detections 缓存的 Minecraft token 数据损坏，准备重新认证")
-	}
-
-	xstsResp, msToken, err := c.resolveXSTSToken(cache, now)
-	if err != nil {
-		return fmt.Errorf("Microsoft 登录失败: %w", err)
-	}
-
-	mcToken, err := mcauth.GetMinecraftToken(xstsResp)
-	if err != nil {
-		return fmt.Errorf("获取 Minecraft Token 失败: %w", err)
-	}
-	if err := mcauth.VerifyGameOwnership(mcToken.AccessToken); err != nil {
-		return err
-	}
-
-	profile, err := mcauth.GetProfile(mcToken.AccessToken)
-	if err != nil {
-		return err
-	}
-	if err := c.setOnlineSession(mcToken.AccessToken, profile.ID, profile.Name); err != nil {
-		return err
-	}
-
-	if msToken != nil {
-		cache.Microsoft.AccessToken = strings.TrimSpace(msToken.AccessToken)
-		if refresh := strings.TrimSpace(msToken.RefreshToken); refresh != "" {
-			cache.Microsoft.RefreshToken = refresh
-		}
-		cache.Microsoft.ExpiresAt = tokenExpiresAt(msToken.ExpiresIn)
-	}
-	cache.Minecraft.AccessToken = mcToken.AccessToken
-	cache.Minecraft.ExpiresAt = tokenExpiresAt(mcToken.ExpiresIn)
-	cache.Minecraft.ProfileID = c.online.ProfileID
-	cache.Minecraft.ProfileName = c.online.ProfileName
-
-	if err := session.Save(c.offlineName, cache); err != nil {
-		logx.Warnf("写入 token 缓存失败: %v", err)
-	}
-
 	logx.Infof("正版认证成功: %s (%s)", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
 	return nil
-}
-
-func (c *Client) resolveXSTSToken(cache *session.TokenCache, now time.Time) (*microsoft.XSTSResponse, *microsoft.TokenResponse, error) {
-	if cache != nil && cache.HasValidMicrosoftAccess(now) {
-		xstsResp, err := microsoft.GetXSTSTokenFromAccessToken(cache.Microsoft.AccessToken)
-		if err == nil {
-			logx.LogTokenCache("microsoft", "", "")
-			return xstsResp, nil, nil
-		}
-		logx.LogTokenExpired("microsoft", err)
-	}
-
-	if cache != nil && cache.HasMicrosoftRefreshToken() {
-		msToken, err := microsoft.RefreshMicrosoftToken(cache.Microsoft.RefreshToken)
-		if err == nil {
-			xstsResp, xstsErr := microsoft.GetXSTSTokenFromMicrosoftToken(msToken)
-			if xstsErr == nil {
-				logx.Infof("已通过 refresh_token 刷新 Microsoft 令牌")
-				return xstsResp, msToken, nil
-			}
-			logx.Warnf("刷新后换取 XSTS 失败，回退设备码授权: %v", xstsErr)
-		} else {
-			logx.Warnf("refresh_token 刷新失败，回退设备码授权: %v", err)
-		}
-	}
-
-	msToken, err := microsoft.GetMicrosoftToken()
-	if err != nil {
-		return nil, nil, err
-	}
-	xstsResp, err := microsoft.GetXSTSTokenFromMicrosoftToken(msToken)
-	if err != nil {
-		return nil, nil, err
-	}
-	logx.Infof("Microsoft 设备码登录成功")
-	return xstsResp, msToken, nil
 }
 
 func (c *Client) setOnlineSession(accessToken, profileID, profileName string) error {
@@ -468,13 +394,6 @@ func (c *Client) setOnlineSession(accessToken, profileID, profileName string) er
 		ProfileUUID: profileUUID,
 	}
 	return nil
-}
-
-func tokenExpiresAt(expiresIn int) time.Time {
-	if expiresIn <= 0 {
-		return time.Time{}
-	}
-	return time.Now().Add(time.Duration(expiresIn) * time.Second).UTC()
 }
 
 // SendCommand 发送命令（无签名）

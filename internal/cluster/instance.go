@@ -2,10 +2,12 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
 )
@@ -72,6 +74,7 @@ type Instance struct {
 
 	startRunnerFn func(runVersion uint64) error
 	runnerFactory runnerFactory
+	authManager   *authsession.AuthManager
 }
 
 // newInstance 创建新实例（内部使用）
@@ -147,6 +150,10 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 			Debug:      false,
 			EnableFile: true,
 		},
+		ClusterRuntime: config.ClusterRuntimeConfig{
+			AccountID:   i.Account.ID,
+			AuthManager: i.authManager,
+		},
 	}
 
 	// 创建runner
@@ -154,7 +161,7 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 	if factory == nil {
 		factory = defaultRunnerFactory
 	}
-	i.runner = factory(cfg)
+	i.runner = factory(cfg, i.authManager)
 
 	// 创建上下文
 	ctx, cancel := context.WithCancel(context.Background())
@@ -172,6 +179,15 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 		i.errChan <- err
 
 		category := classifyExitCategory(err)
+		if errors.Is(err, authsession.ErrDeviceLoginRequired) ||
+			errors.Is(err, authsession.ErrRefreshTokenInvalid) ||
+			errors.Is(err, authsession.ErrProviderUnavailable) ||
+			errors.Is(err, authsession.ErrRefreshUpstream) ||
+			errors.Is(err, authsession.ErrOwnershipFailed) ||
+			errors.Is(err, authsession.ErrProfileInvalid) ||
+			errors.Is(err, authsession.ErrXSTSDenied) {
+			category = ExitCategoryAuthFailed
+		}
 		handled := i.applyExitEvent(runVersion, category, err)
 		if handled {
 			i.signalExit()

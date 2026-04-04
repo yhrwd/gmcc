@@ -11,7 +11,7 @@ func TestManager_StartDoesNotAutoLaunchEnabledAccounts(t *testing.T) {
 
 	cfg := DefaultClusterConfig()
 	cfg.Accounts = []AccountEntry{{ID: "a1", PlayerID: "p1", Enabled: true}}
-	m := NewManager(cfg)
+	m := NewManager(cfg, nil)
 	if err := m.Start(); err != nil {
 		t.Fatalf("start manager: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestManager_DeleteTimeoutWhenRunnerBlocks(t *testing.T) {
 
 	cfg := DefaultClusterConfig()
 	cfg.Global.ReconnectPolicy.Enabled = false
-	m := NewManager(cfg)
+	m := NewManager(cfg, nil)
 	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestManager_LocalSimulationReconnectPolicy(t *testing.T) {
 			cfg.Global.ReconnectPolicy.Multiplier = 1
 			cfg.Global.ReconnectPolicy.MaxRetries = 1
 
-			m := NewManager(cfg)
+			m := NewManager(cfg, nil)
 			if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
 				t.Fatalf("create: %v", err)
 			}

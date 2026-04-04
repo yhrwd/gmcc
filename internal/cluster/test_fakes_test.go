@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
 	"gmcc/internal/mcclient"
@@ -102,7 +103,7 @@ func newScriptedRunnerFactory(outcomes ...runnerOutcome) *scriptedRunnerFactory 
 	return &scriptedRunnerFactory{outcomes: outcomes}
 }
 
-func (f *scriptedRunnerFactory) Build(_ *config.Config) runner {
+func (f *scriptedRunnerFactory) Build(_ *config.Config, _ *authsession.AuthManager) runner {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

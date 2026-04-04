@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	authsession "gmcc/internal/auth/session"
+
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -23,6 +25,15 @@ type Config struct {
 	// 向后兼容配置
 	Account AccountConfig `yaml:"account"`
 	Server  ServerConfig  `yaml:"server"`
+
+	// 集群运行时注入配置（不参与序列化）
+	ClusterRuntime ClusterRuntimeConfig `yaml:"-"`
+}
+
+// ClusterRuntimeConfig 集群运行时配置（仅进程内使用）
+type ClusterRuntimeConfig struct {
+	AccountID   string                   `yaml:"-"`
+	AuthManager *authsession.AuthManager `yaml:"-"`
 }
 
 // ClusterConfig 集群配置（与 internal/cluster/config.go 保持一致）

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/config"
 	"gmcc/internal/headless"
 	"gmcc/internal/mcclient"
@@ -22,9 +23,12 @@ type runner interface {
 	GetPlayer() *mcclient.Player
 }
 
-type runnerFactory func(cfg *config.Config) runner
+type runnerFactory func(cfg *config.Config, authManager *authsession.AuthManager) runner
 
-func defaultRunnerFactory(cfg *config.Config) runner {
+func defaultRunnerFactory(cfg *config.Config, authManager *authsession.AuthManager) runner {
+	if cfg != nil {
+		cfg.ClusterRuntime.AuthManager = authManager
+	}
 	return headless.New(cfg)
 }
 

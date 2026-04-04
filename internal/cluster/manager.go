@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/logx"
 )
 
@@ -34,10 +35,12 @@ type Manager struct {
 	// 上下文
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	authManager *authsession.AuthManager
 }
 
 // NewManager 创建集群管理器
-func NewManager(config ClusterConfig, configPath ...string) *Manager {
+func NewManager(config ClusterConfig, authManager *authsession.AuthManager, configPath ...string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
@@ -48,6 +51,7 @@ func NewManager(config ClusterConfig, configPath ...string) *Manager {
 		deleteTimeout: 10 * time.Second,
 		ctx:           ctx,
 		cancel:        cancel,
+		authManager:   authManager,
 	}
 
 	// 如果传入了配置路径，保存它
@@ -134,6 +138,7 @@ func (m *Manager) CreateInstance(id string, account AccountEntry) error {
 
 	// 创建实例
 	inst := newInstance(id, account, m)
+	inst.authManager = m.authManager
 	m.instances[id] = inst
 
 	logx.Infof("实例已创建: %s (player_id=%s)", id, account.PlayerID)
