@@ -19,6 +19,8 @@
 - 仅在网络层明确断开时触发自动重连。
 - 实现无限重试 + 指数退避策略。
 - 完善创建/移除流程，规避并发竞态。
+- 为认证与连服相关路径提供可本地执行的模拟测试方案（不依赖真实微软账号与真实服务器）。
+- 在生命周期改造范围内清理无用旧代码（仅限与本设计直接相关模块）。
 
 ### Out of Scope
 
@@ -62,20 +64,38 @@
 以下为本阶段必须收敛的契约语义（接口名可按代码风格命名）：
 
 - `Manager` 对 `Instance` 命令接口：
-  - `Start(ctx) error`：
+  - `Start(ctx, trigger) error`：
     - 在 `pending/stopped/error` 可进入启动流程。
-    - 在 `starting/running/reconnecting` 返回 `ErrInstanceRunningLike`（幂等保护）。
+    - 在 `starting/running` 返回 `ErrInstanceRunningLike`（幂等保护）。
+    - 在 `reconnecting`：
+      - `trigger=auto_reconnect` 时允许进入 `starting`（用于重连监督循环）。
+      - 其他 trigger 返回 `ErrInstanceRunningLike`。
+    - `trigger` 取值固定为：`manual_start | manual_restart | auto_reconnect`。
   - `Stop(ctx) error`：
     - 任意状态可调用。
     - 若已 `stopped`，返回 `nil`（幂等）。
     - 必须中断运行协程与重连等待。
-  - `Restart(ctx) error`：等价 `Stop` 成功后再 `Start`。
+  - `Restart(ctx) error`：等价 `Stop(ctx)` 成功后再 `Start(ctx, manual_restart)`。
 - `Instance` 对 `Manager` 事件接口：
   - `OnInstanceExit(instanceID, version, category, err)`：执行层退出后上报。
   - `OnInstanceReady(instanceID, version)`：进入就绪后上报。
 - 并发约束：
   - 同一 `instanceID` 同时最多一个“启动路径”与一个“重连监督路径”。
   - 事件处理按 `instanceID` 串行化，采用 `map[instanceID]*sync.Mutex`（或等价每实例队列）实现，防止跨线程乱序覆盖状态。
+
+命令仲裁优先级（高 -> 低）：`delete > stop > restart > auto_reconnect`。
+
+重连触发职责：
+
+- `reconnecting -> starting` 仅由 `Manager` 的重连监督循环触发。
+- 监督循环调用公开 `Start(ctx, auto_reconnect)` 进入启动路径，不允许调用绕过状态机的内部启动入口。
+- `Instance` 只负责状态迁移执行与幂等校验，不自行发起重连。
+
+外部入口映射：
+
+- API `StartInstance` -> `Start(ctx, manual_start)`。
+- API `RestartInstance` -> `Restart(ctx)`（内部转 `manual_restart`）。
+- 自动重连监督循环 -> `Start(ctx, auto_reconnect)`。
 
 ## 5. 实例状态机设计
 
@@ -136,6 +156,8 @@
 - 删除前必须完成实例终止（运行协程与重连协程都退出）。
 - 删除后从实例表移除并使版本失效。
 - 后台协程状态回写按“实例存在且版本匹配”校验，不满足即丢弃。
+- `Delete` 终止等待超时设为 `delete_timeout = 10s`。
+- 若在超时内仍未完成终止，`Delete` 返回 `ErrDeleteTimeout`，实例保留在注册表且状态置为 `error`（不执行移除）。
 
 版本生命周期约定：
 
@@ -145,6 +167,12 @@
 - 任意异步回写必须同时满足：`instance存在` 且 `event.version==instance.version`。
 - 若 `instance不存在`，事件按 stale event 直接丢弃并记录 debug 日志。
 - 不满足条件的事件直接丢弃并记录 debug 日志。
+
+`Delete` 超时后的处理：
+
+- 不改变当前 `version` 绑定关系，不做移除。
+- 允许后续再次 `Stop/Delete` 重试。
+- 若之后收到旧运行协程事件，继续按“实例存在且版本匹配”规则校验。
 
 ### 7.3 并发安全规则
 
@@ -183,6 +211,10 @@
 - `backoff_jitter = off`（本阶段关闭抖动，便于行为可预测与测试稳定）。
 - `reconnect_backoff = 2s * 1.8^attempt, capped at 2m`。
 - `attempt` 从 1 递增，无上限。
+- `attempt_reset` 规则：
+  - 重连成功并进入 `running` 后重置为 `1`。
+  - 手动 `Restart` 触发新启动周期时重置为 `1`。
+  - 手动 `Stop/Delete` 后不再保留历史 attempt。
 
 ## 10. 可观测性最小要求（本阶段）
 
@@ -213,14 +245,43 @@
 - 人为断链后自动重连并恢复 `running`。
 - 进程重启后默认不自动拉起实例。
 - 删除实例后不会被历史协程“复活”。
+- 重连等待中触发 `Restart`：仅保留一条启动路径，状态迁移无冲突。
+- 重连等待中触发 `Delete`：重连循环被中断，按 `Delete` 语义成功移除或超时返回 `ErrDeleteTimeout`。
+- `OnInstanceExit` 与 `Delete` 并发：不会出现已删除实例被回写为 `running/error`。
 
-### 11.3 验收门槛
+### 11.3 本地模拟测试策略（新增）
+
+- 认证模拟：
+  - 通过可注入的 auth provider/stub 返回固定 token 与可控错误（`auth_failed`、超时、刷新失败），覆盖生命周期与错误归因。
+  - 禁止在 CI/本地默认测试中依赖真实微软账号交互。
+- 连服模拟：
+  - 使用本地 fake server（或可控 `net.Listener` harness）模拟握手成功、延迟、EOF、连接重置、启动期无响应。
+  - 可脚本化触发“先 ready 后断链”“持续拒绝连接”“间歇性网络抖动”等场景。
+- 稳定性验证：
+  - 单实例与多实例场景都需在本地可复现。
+  - 核心重连行为测试不依赖公网与第三方服务可用性。
+- 真实链路测试：
+  - 真实微软登录与真实服务器联调作为可选手工验证项，不作为默认自动化门槛。
+
+### 11.4 验收门槛
 
 - `go test ./...` 通过。
 - 关键并发路径在 `go test -race ./...` 下无数据竞争。
 - 日志可完整重建一次断线与恢复链路。
+- 本地模拟测试可稳定通过，且不要求外部账号/公网依赖。
 
-## 12. 实施边界与后续衔接
+## 12. 旧代码清理策略（新增）
+
+- 清理原则：仅清理由本次生命周期重构替代且已无调用路径的代码，不做无关大规模重构。
+- 清理对象：
+  - 重复/失效的状态写入分支。
+  - 已被统一状态机替代的分散重连逻辑。
+  - 不再使用的生命周期辅助字段或函数。
+- 安全措施：
+  - 删除前通过引用搜索与测试确认无调用。
+  - 清理与功能改造分提交（或分 commit 区块）以便回溯。
+
+## 13. 实施边界与后续衔接
 
 子项目A完成后，进入子项目B与C：
 
