@@ -26,6 +26,11 @@ type Manager struct {
 	instances map[string]*Instance
 	startTime time.Time
 
+	// 监督与删除控制
+	supervisionMu sync.Mutex
+	supervising   map[string]bool
+	deleteTimeout time.Duration
+
 	// 上下文
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -36,11 +41,13 @@ func NewManager(config ClusterConfig, configPath ...string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
-		config:    config,
-		instances: make(map[string]*Instance),
-		startTime: time.Now(),
-		ctx:       ctx,
-		cancel:    cancel,
+		config:        config,
+		instances:     make(map[string]*Instance),
+		startTime:     time.Now(),
+		supervising:   make(map[string]bool),
+		deleteTimeout: 10 * time.Second,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	// 如果传入了配置路径，保存它
@@ -54,24 +61,26 @@ func NewManager(config ClusterConfig, configPath ...string) *Manager {
 // Start 启动集群管理器
 func (m *Manager) Start() error {
 	logx.Infof("集群管理器启动: max_instances=%d", m.config.Global.MaxInstances)
+	// 设计约束：启动管理器不自动拉起实例，仅通过 API/命令显式启动
+	return nil
+}
 
-	// 自动启动所有启用的账号
-	for _, account := range m.config.Accounts {
-		if !account.Enabled {
-			continue
-		}
+func (m *Manager) beginSupervision(id string) bool {
+	m.supervisionMu.Lock()
+	defer m.supervisionMu.Unlock()
 
-		if err := m.CreateInstance(account.ID, account); err != nil {
-			logx.Warnf("创建实例失败 %s: %v", account.ID, err)
-			continue
-		}
-
-		if err := m.StartInstance(account.ID); err != nil {
-			logx.Warnf("启动实例失败 %s: %v", account.ID, err)
-		}
+	if m.supervising[id] {
+		return false
 	}
 
-	return nil
+	m.supervising[id] = true
+	return true
+}
+
+func (m *Manager) endSupervision(id string) {
+	m.supervisionMu.Lock()
+	delete(m.supervising, id)
+	m.supervisionMu.Unlock()
 }
 
 // Stop 停止集群管理器
@@ -273,12 +282,18 @@ func (m *Manager) handleInstanceStopped(id string, err error) {
 
 	// 检查是否需要自动重连
 	if m.config.Global.ReconnectPolicy.Enabled {
+		if !m.beginSupervision(inst.ID) {
+			logx.Debugf("实例 %s 已在重连监督中，忽略重复触发", inst.ID)
+			return
+		}
 		go m.handleReconnect(inst)
 	}
 }
 
 // handleReconnect 处理自动重连
 func (m *Manager) handleReconnect(inst *Instance) {
+	defer m.endSupervision(inst.ID)
+
 	policy := m.config.Global.ReconnectPolicy
 
 	// 增加重连计数
@@ -308,8 +323,8 @@ func (m *Manager) handleReconnect(inst *Instance) {
 		case <-time.After(delay):
 		}
 
-		// 尝试启动
-		if err := inst.Start(); err == nil {
+		// 尝试启动（仅自动重连触发）
+		if err := inst.StartWithTrigger(StartTriggerAutoReconnect); err == nil {
 			logx.Infof("实例 %s 重连成功", inst.ID)
 			return
 		} else {
