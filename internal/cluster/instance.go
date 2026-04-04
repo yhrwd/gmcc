@@ -58,8 +58,10 @@ type Instance struct {
 	lastActive     time.Time
 	reconnectCount int
 	errorMsg       string
-	version        int64
-	runVersion     int64
+	version        uint64
+	runVersion     uint64
+	deleted        bool
+	exitCh         chan struct{}
 
 	// 运行时
 	runner  *headless.Runner
@@ -69,7 +71,7 @@ type Instance struct {
 	// 父级管理器
 	manager *Manager
 
-	startRunnerFn func(runVersion int64) error
+	startRunnerFn func(runVersion uint64) error
 }
 
 // newInstance 创建新实例（内部使用）
@@ -79,6 +81,7 @@ func newInstance(id string, account AccountEntry, manager *Manager) *Instance {
 		Account: account,
 		status:  StatusPending,
 		errChan: make(chan error, 1),
+		exitCh:  make(chan struct{}, 1),
 		manager: manager,
 	}
 }
@@ -108,6 +111,7 @@ func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 	}
 	i.version++
 	i.runVersion = i.version
+	i.exitCh = make(chan struct{}, 1)
 
 	if err := i.transitionToLocked(StatusStarting, ""); err != nil {
 		return err
@@ -125,7 +129,7 @@ func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 	return nil
 }
 
-func (i *Instance) startRunnerLocked(runVersion int64) error {
+func (i *Instance) startRunnerLocked(runVersion uint64) error {
 
 	// 创建配置
 	cfg := &config.Config{
@@ -166,10 +170,13 @@ func (i *Instance) startRunnerLocked(runVersion int64) error {
 		if err == nil {
 			category = ExitCategoryManualStop
 		}
-		i.applyExitEvent(runVersion, category, err)
+		handled := i.applyExitEvent(runVersion, category, err)
+		if handled {
+			i.signalExit()
+		}
 
 		// 通知管理器
-		if i.manager != nil {
+		if handled && i.manager != nil {
 			i.manager.handleInstanceStopped(i.ID, err)
 		}
 	}()
@@ -334,34 +341,57 @@ func (i *Instance) transitionToLocked(next InstanceStatus, reason string) error 
 	return nil
 }
 
-func (i *Instance) applyExitEvent(runVersion int64, category ExitCategory, err error) bool {
+func (i *Instance) applyExitEvent(runVersion uint64, category ExitCategory, err error) bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	if runVersion != i.runVersion {
+	if runVersion != i.version || i.deleted {
 		return false
 	}
 
-	if i.status == StatusStopped {
-		return false
+	if category == ExitCategoryNetworkDisconnect {
+		_ = i.transitionToLocked(StatusReconnecting, "network disconnect")
+		return true
 	}
 
 	next := StatusStopped
 	reason := ""
-	if err != nil {
+	if category != ExitCategoryManualStop && err != nil {
 		next = StatusError
 		reason = err.Error()
 	}
-	if category == ExitCategoryManualStop {
-		next = StatusStopped
-		reason = ""
-	}
-
-	if transitionErr := i.transitionToLocked(next, reason); transitionErr != nil {
-		return false
-	}
+	_ = i.transitionToLocked(next, reason)
 
 	return true
+}
+
+func (i *Instance) signalExit() {
+	select {
+	case i.exitCh <- struct{}{}:
+	default:
+	}
+}
+
+func (i *Instance) waitExit(ctx context.Context) error {
+	select {
+	case <-i.exitCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (i *Instance) markDeleted() {
+	i.mu.Lock()
+	i.deleted = true
+	i.mu.Unlock()
+}
+
+func (i *Instance) markError(msg string) {
+	i.mu.Lock()
+	i.errorMsg = msg
+	i.lastActive = time.Now()
+	i.mu.Unlock()
 }
 
 // updateLastActive 更新最后活动时间

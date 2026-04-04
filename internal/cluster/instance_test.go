@@ -20,7 +20,7 @@ func TestInstance_StartTriggerRules(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			inst := newInstance("i1", AccountEntry{ID: "i1", PlayerID: "p1"}, nil)
 			inst.status = tt.status
-			inst.startRunnerFn = func(_ int64) error {
+			inst.startRunnerFn = func(_ uint64) error {
 				return nil
 			}
 

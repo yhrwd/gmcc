@@ -142,22 +142,29 @@ func (m *Manager) CreateInstance(id string, account AccountEntry) error {
 
 // DeleteInstance 删除实例
 func (m *Manager) DeleteInstance(id string) error {
-	m.mu.Lock()
-	inst, exists := m.instances[id]
-	m.mu.Unlock()
-
-	if !exists {
-		return ErrInstanceNotFound
+	inst, err := m.GetInstance(id)
+	if err != nil {
+		return err
 	}
 
-	// 先停止实例
-	if inst.GetStatus() == StatusRunning || inst.GetStatus() == StatusStarting {
-		if err := inst.Stop(); err != nil {
-			return fmt.Errorf("failed to stop instance: %w", err)
+	status := inst.GetStatus()
+	if status == StatusRunning || status == StatusStarting || status == StatusReconnecting {
+		_ = inst.Stop()
+
+		timeout := m.deleteTimeout
+		if timeout <= 0 {
+			timeout = 10 * time.Second
 		}
-		// 等待停止
-		time.Sleep(500 * time.Millisecond)
+
+		ctx, cancel := context.WithTimeout(m.ctx, timeout)
+		defer cancel()
+		if err := inst.waitExit(ctx); err != nil {
+			inst.markError("delete timeout")
+			return ErrDeleteTimeout
+		}
 	}
+
+	inst.markDeleted()
 
 	m.mu.Lock()
 	delete(m.instances, id)

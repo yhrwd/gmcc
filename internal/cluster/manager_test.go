@@ -1,8 +1,9 @@
 package cluster
 
 import (
-	"reflect"
+	"errors"
 	"testing"
+	"time"
 )
 
 func TestManager_StartDoesNotAutoLaunchEnabledAccounts(t *testing.T) {
@@ -28,11 +29,24 @@ func TestManager_DeleteTimeoutWhenRunnerBlocks(t *testing.T) {
 	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	m.deleteTimeout = 20 * time.Millisecond
 
-	mgrType := reflect.TypeOf(m)
-	if _, ok := mgrType.Elem().FieldByName("deleteTimeout"); !ok {
-		t.Fatalf("missing symbol: Manager.deleteTimeout")
+	inst, err := m.GetInstance("a1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	inst.startRunnerFn = func(_ uint64) error { return nil }
+
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
 	}
 
-	t.Fatalf("pending behavior test: delete should timeout when runner blocks")
+	err = m.DeleteInstance("a1")
+	if !errors.Is(err, ErrDeleteTimeout) {
+		t.Fatalf("expected ErrDeleteTimeout, got %v", err)
+	}
+
+	if !m.InstanceExists("a1") {
+		t.Fatalf("instance should remain after delete timeout")
+	}
 }
