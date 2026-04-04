@@ -70,10 +70,36 @@ func TestAuthManager_ProviderUnavailableNormalizesToAuthFailed(t *testing.T) {
 	}
 }
 
-type fakeTokenStore struct{}
-
 func newFakeTokenStore() *fakeTokenStore {
-	return &fakeTokenStore{}
+	return &fakeTokenStore{caches: map[string]*TokenCache{}}
+}
+
+type fakeTokenStore struct {
+	mu     sync.Mutex
+	caches map[string]*TokenCache
+}
+
+func (f *fakeTokenStore) Load(accountID string) (*TokenCache, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if cache, ok := f.caches[accountID]; ok {
+		copy := *cache
+		return &copy, nil
+	}
+	return &TokenCache{
+		AccountID: accountID,
+		Microsoft: MicrosoftTokenCache{
+			RefreshToken: "refresh-token",
+		},
+	}, nil
+}
+
+func (f *fakeTokenStore) Save(accountID string, cache *TokenCache) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	copy := *cache
+	f.caches[accountID] = &copy
+	return nil
 }
 
 type fakeProvider struct {
