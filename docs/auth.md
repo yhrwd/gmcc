@@ -1,385 +1,262 @@
-# 认证系统文档
+# 认证与账号状态文档
 
-## 概述
+本文档面向前端和后端对接，说明 gmcc 当前的账号认证模型、Microsoft 设备码登录流程、账号状态语义，以及实例创建前需要满足的条件。
 
-gmcc 支持 Minecraft Java 版的两种认证模式：
-- **正版认证**：Microsoft/Xbox/Minecraft 三级认证链
-- **离线模式**：直接使用玩家名称
+## 1. 认证模型概览
 
-## 认证流程图
+gmcc 将账号资源和认证凭据分开管理：
 
+- 账号 metadata 存在 `.state/accounts.yaml`
+- 认证凭据存在 `auth.vault.path` 指向的加密目录中
+- 实例 metadata 存在 `.state/instances.yaml`
+
+前端可以把它理解为三类对象：
+
+- `account`: 业务资源，表示系统中定义了一个可用账号
+- `auth session`: 该账号当前是否已登录，以及是否可用于创建实例
+- `instance`: 使用某个账号实际连接 Minecraft 服务器的运行单元
+
+## 2. 账号认证状态
+
+`GET /api/accounts` 和 `GET /api/accounts/:id` 会返回以下字段：
+
+- `id`: 账号 ID
+- `player_id`: 已登录时返回的 Minecraft Profile ID
+- `enabled`: 账号是否启用
+- `label`: 前端展示标签
+- `note`: 备注
+- `auth_status`: 认证状态
+- `has_token`: 是否存在可恢复或异常待处理的凭据记录
+
+### `auth_status` 枚举
+
+| 值 | 含义 | 前端建议 |
+|---|---|---|
+| `not_logged_in` | 账号尚未登录，或没有可用认证记录 | 引导用户发起 Microsoft 登录 |
+| `logged_in` | 账号已有可用刷新凭据，可用于创建实例 | 允许创建实例 |
+| `auth_invalid` | 存在认证记录，但记录损坏、过期或需要重新登录 | 提示用户重新登录 |
+
+### `has_token` 的含义
+
+`has_token` 不是“当前 access token 是否未过期”的精确表达，而是“系统中是否存在该账号的认证记录”。
+
+当前实现下：
+
+- `logged_in` -> `has_token=true`
+- `auth_invalid` -> `has_token=true`
+- `not_logged_in` -> `has_token=false`
+
+前端做按钮可用性判断时，应以 `auth_status` 为主，不要只看 `has_token`。
+
+## 3. Microsoft 设备码登录流程
+
+当前公开的认证 API 有两个：
+
+- `POST /api/auth/microsoft/init`
+- `POST /api/auth/microsoft/poll`
+
+这是标准的设备码授权模式，适合前端后台分离场景。
+
+### 流程图
+
+```text
+前端                    gmcc                     Microsoft / Minecraft
+ |                        |                                |
+ | POST /auth/init        |                                |
+ |----------------------->| 申请 device code               |
+ |                        |------------------------------->|
+ |                        | 返回 user_code / verify_url    |
+ |<-----------------------|                                |
+ | 展示验证码和跳转链接    |                                |
+ | 用户浏览器完成授权      |                                |
+ | POST /auth/poll        | 查询登录状态                    |
+ |----------------------->|------------------------------->|
+ |<-----------------------| pending / succeeded / failed   |
+ |                        |                                |
+ | succeeded 后拿到 profile |                                |
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       正版认证流程                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. 检查缓存                                                    │
-│     ├─ 有效 Minecraft Token → 直接使用                          │
-│     ├─ 有效 MS Access Token → 换取 XSTS                         │
-│     └─ 使用 Refresh Token → 刷新 MS Token                       │
-│                                                                 │
-│  2. 设备码登录（无缓存时）                                       │
-│     ├─ 请求 Microsoft 设备码                                    │
-│     ├─ 用户访问 URL 输入设备码                                  │
-│     ├─ 轮询等待授权完成                                         │
-│     └─ 获取 Microsoft Access Token                              │
-│                                                                 │
-│  3. Xbox Live 认证                                              │
-│     └─ MS Token → Xbox Token → XSTS Token                       │
-│                                                                 │
-│  4. Minecraft 认证                                              │
-│     ├─ XSTS Token → Minecraft Access Token                      │
-│     ├─ 验证游戏所有权                                           │
-│     └─ 获取玩家 Profile                                         │
-│                                                                 │
-│  5. 会话加入                                                    │
-│     └─ JoinServer(serverHash) → 服务器验证                      │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
 
-## 微软认证服务
+### 3.1 初始化登录
 
-### 端点
+请求：
 
-| 端点 | URL | 用途 |
-|------|-----|------|
-| Device Code | `https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode` | 获取设备码 |
-| Token | `https://login.microsoftonline.com/consumers/oauth2/v2.0/token` | 获取/刷新令牌 |
-| Xbox Auth | `https://user.auth.xboxlive.com/user/authenticate` | Xbox 认证 |
-| XSTS Auth | `https://xsts.auth.xboxlive.com/xsts/authorize` | XSTS 认证 |
+```http
+POST /api/auth/microsoft/init
+Content-Type: application/json
 
-### 设备码登录
-
-```go
-// 1. 请求设备码
-type deviceCodeResponse struct {
-    DeviceCode      string `json:"device_code"`
-    UserCode        string `json:"user_code"`
-    VerificationURI string `json:"verification_uri"`
-    ExpiresIn       int    `json:"expires_in"`
-    Interval        int    `json:"interval"`
-}
-
-// 2. 轮询等待授权
-for {
-    time.Sleep(time.Duration(interval) * time.Second)
-    resp, err := pollToken(deviceCode)
-    if resp.AccessToken != "" {
-        return resp, nil
-    }
-}
-```
-
-### Xbox/XSTS 认证
-
-```go
-// Xbox 认证
-xboxRequest := {
-    "Properties": {
-        "AuthMethod": "RPS",
-        "SiteName": "user.auth.xboxlive.com",
-        "RpsTicket": "d=" + msAccessToken
-    },
-    "RelyingParty": "http://auth.xboxlive.com",
-    "TokenType": "JWT"
-}
-
-// XSTS 认证
-xstsRequest := {
-    "Properties": {
-        "SandboxId": "RETAIL",
-        "UserTokens": [xboxToken]
-    },
-    "RelyingParty": "rp://api.minecraftservices.com/",
-    "TokenType": "JWT"
+{
+  "account_id": "acc-main"
 }
 ```
 
-## Minecraft 认证服务
+成功响应：
 
-### 端点
-
-| 端点 | URL | 用途 |
-|------|-----|------|
-| Login | `https://api.minecraftservices.com/authentication/login_with_xbox` | 登录 |
-| Ownership | `https://api.minecraftservices.com/entitlements/mcstore` | 验证所有权 |
-| Profile | `https://api.minecraftservices.com/minecraft/profile` | 获取档案 |
-| Certificates | `https://api.minecraftservices.com/player/certificates` | 玩家证书 |
-| Join | `https://sessionserver.mojang.com/session/minecraft/join` | 会话加入 |
-| HasJoined | `https://sessionserver.mojang.com/session/minecraft/hasJoined` | 验证加入 |
-
-### 获取 Minecraft Token
-
-```go
-type minecraftLoginResponse struct {
-    AccessToken string `json:"access_token"`
-    ExpiresIn   int    `json:"expires_in"`
-}
-
-func GetMinecraftToken(xsts *XSTSResponse) (*minecraftLoginResponse, error) {
-    // 构建请求
-    body := map[string]string{
-        "identityToken": "XBL3.0 x=" + xsts.DisplayClaims.Xui[0].Uhs + ";" + xsts.Token,
-    }
-    // POST 到 Minecraft 登录端点
+```json
+{
+  "success": true,
+  "user_code": "ABCD-EFGH",
+  "verification_uri": "https://microsoft.com/devicelogin",
+  "verification_uri_complete": "https://microsoft.com/devicelogin?code=ABCD-EFGH",
+  "expires_in": 900,
+  "interval": 5,
+  "account_id": "acc-main"
 }
 ```
 
-### 验证游戏所有权
+字段说明：
 
-```go
-func VerifyGameOwnership(accessToken string) error {
-    // GET /entitlements/mcstore
-    // 检查响应中是否包含 Minecraft 项目
+- `user_code`: 需要展示给用户输入的设备码
+- `verification_uri`: 用户可访问的授权地址
+- `verification_uri_complete`: 可直接跳转的完整地址
+- `expires_in`: 设备码剩余秒数
+- `interval`: 建议轮询间隔，单位秒
+- `account_id`: 绑定的账号 ID
+
+前端建议：
+
+- 弹出登录对话框
+- 高亮显示 `user_code`
+- 提供“复制验证码”和“打开授权页”按钮
+- 使用 `interval` 作为轮询周期，避免过快轮询
+
+### 3.2 轮询登录状态
+
+请求：
+
+```http
+POST /api/auth/microsoft/poll
+Content-Type: application/json
+
+{
+  "account_id": "acc-main"
 }
 ```
 
-### 获取玩家档案
+处理中响应：
 
-```go
-type MinecraftProfile struct {
-    ID   string `json:"id"`
-    Name string `json:"name"`
-}
-
-func GetProfile(accessToken string) (*MinecraftProfile, error) {
-    // GET /minecraft/profile
-    // 返回玩家 UUID 和名称
+```json
+{
+  "success": true,
+  "status": "pending",
+  "message": "Waiting for user authorization...",
+  "account_id": "acc-main"
 }
 ```
 
-### 获取玩家证书
+成功响应：
 
-用于聊天签名：
-
-```go
-type PlayerCertificate struct {
-    KeyPair struct {
-        PrivateKey string `json:"privateKey"`
-        PublicKey  string `json:"publicKey"`
-    } `json:"keyPair"`
-    PublicKeySignature   string `json:"publicKeySignature"`
-    PublicKeySignatureV2 string `json:"publicKeySignatureV2"`
-    ExpiresAt            string `json:"expiresAt"`
+```json
+{
+  "success": true,
+  "status": "succeeded",
+  "message": "Microsoft authentication succeeded",
+  "minecraft_profile": {
+    "id": "player-uuid",
+    "name": "PlayerName"
+  },
+  "account_id": "acc-main"
 }
 ```
 
-## 会话加入
+失败或结束响应：
 
-### 流程
-
-```
-1. 收到服务器 encryption_request
-   ↓
-2. 生成 shared_secret (16 bytes)
-   ↓
-3. 计算 server_hash = sha1(serverID + shared_secret + publicKey)
-   ↓  
-4. 调用 JoinServer(accessToken, profileID, serverHash)
-   ↓
-5. 发送 encryption_response
-   ↓
-6. 启用 AES/CFB8 加密流
-```
-
-### Server Hash 计算
-
-Minecraft 使用特殊的 SHA-1 十六进制格式：
-
-```go
-func minecraftServerHash(serverID string, sharedSecret, publicKey []byte) string {
-    h := sha1.New()
-    h.Write([]byte(serverID))
-    h.Write(sharedSecret)
-    h.Write(publicKey)
-    sum := h.Sum(nil)
-    
-    // 处理负数情况（二进制补码）
-    if sum[0]&0x80 != 0 {
-        // 取反加一
-        for i := range sum {
-            sum[i] = ^sum[i]
-        }
-        for i := len(sum) - 1; i >= 0; i-- {
-            sum[i]++
-            if sum[i] != 0 {
-                break
-            }
-        }
-        n := new(big.Int).SetBytes(sum)
-        return "-" + n.Text(16)
-    }
-    
-    n := new(big.Int).SetBytes(sum)
-    return n.Text(16)
+```json
+{
+  "success": false,
+  "status": "expired",
+  "message": "Device login expired",
+  "account_id": "acc-main"
 }
 ```
 
-## 令牌缓存
+### `status` 枚举
 
-### 缓存结构
+| 值 | 含义 | 前端行为 |
+|---|---|---|
+| `pending` | 用户尚未完成授权 | 保持轮询 |
+| `succeeded` | 登录成功，凭据已写入 vault | 结束轮询，刷新账号列表 |
+| `expired` | 设备码过期 | 提示重新发起登录 |
+| `cancelled` | 登录流程已取消 | 关闭弹窗或允许重试 |
+| `failed` | 登录失败 | 展示错误并允许重新发起 |
 
-```go
-type TokenCache struct {
-    Microsoft struct {
-        AccessToken  string    `json:"access_token,omitempty"`
-        RefreshToken string    `json:"refresh_token,omitempty"`
-        ExpiresAt    time.Time `json:"expires_at,omitempty"`
-    } `json:"microsoft"`
-    Minecraft struct {
-        AccessToken string    `json:"access_token,omitempty"`
-        ExpiresAt   time.Time `json:"expires_at,omitempty"`
-        ProfileID   string    `json:"profile_id,omitempty"`
-        ProfileName string    `json:"profile_name,omitempty"`
-    } `json:"minecraft"`
-}
-```
+## 4. 认证数据存储
 
-### 缓存优先级
+当前实现不再使用旧的 `.session/*.json` 明文缓存模型，而是使用每账号一个加密文件的 vault 模型。
 
-1. **Minecraft Access Token**: 直接使用，无需重新认证
-2. **Microsoft Refresh Token**: 刷新获取新的 MS Token
-3. **设备码登录**: 重新进行完整认证流程
+特点：
 
-### 缓存文件位置
+- 每个账号单独一个 `.vault` 文件
+- 所有文件共享同一把主密钥
+- 主密钥从环境变量读取，不写入 `config.yaml`
+- 文件名带账号可读前缀和短 hash，便于排查但不直接暴露全部信息
 
-```
-.session/<account_id>.json
-```
+启动服务前必须设置：
 
-## 集群认证补充
+- `GMCC_AUTH_VAULT_KEY`，或配置中 `auth.vault.key_env` 指向的变量名
 
-- 正版认证 token 缓存按 `account_id` 持有，不再按 `player_id` 作为官方认证缓存主键。
-- 同账号并发实例共享认证会话，刷新流程由 `AuthManager` 单飞协调。
-- `refresh_token` 失效或需要设备码重新登录时，实例进入 `auth_failed`，不会触发自动网络重连。
-- 真实微软登录仅作为手工联调项；默认自动化验证使用 fake provider。
+## 5. 实例创建前置条件
 
-### 缓存验证
+实例创建不是登录接口。当前模型要求：
 
-```go
-func (c *TokenCache) HasValidMinecraftToken(now time.Time) bool {
-    return c.Minecraft.AccessToken != "" &&
-           !c.Minecraft.ExpiresAt.IsZero() &&
-           c.Minecraft.ExpiresAt.After(now.Add(5*time.Minute))
-}
+1. 账号已存在于账号 metadata 中
+2. 账号 `enabled=true`
+3. 账号认证状态为 `logged_in`
 
-func (c *TokenCache) HasValidMicrosoftAccess(now time.Time) bool {
-    return c.Microsoft.AccessToken != "" &&
-           !c.Microsoft.ExpiresAt.IsZero() &&
-           c.Microsoft.ExpiresAt.After(now.Add(5*time.Minute))
-}
+如果不满足条件，实例创建会失败。
 
-func (c *TokenCache) HasMicrosoftRefreshToken() bool {
-    return c.Microsoft.RefreshToken != ""
-}
-```
+前端推荐流程：
 
-## 离线模式
+1. 先创建账号
+2. 再做 Microsoft 登录
+3. 登录成功后刷新账号列表
+4. 仅对 `auth_status=logged_in` 的账号开放实例创建
 
-离线模式直接使用配置中的 `player_id` 作为用户名：
+## 6. 前端页面建议
 
-```go
-// 生成离线 UUID
-func offlineUUID(name string) [16]byte {
-    hash := md5.Sum([]byte("OfflinePlayer:" + name))
-    hash[6] = (hash[6] & 0x0F) | 0x30  // 版本 3
-    hash[8] = (hash[8] & 0x3F) | 0x80  // 变体 2
-    return hash
-}
-```
+### 账号列表页
 
-### 离线模式限制
+建议展示：
 
-- 无法加入正版服务器（online-mode=true）
-- 无法使用皮肤
-- 无法使用聊天签名功能
-- 无法使用某些需要认证的功能
+- 账号 ID
+- 标签与备注
+- 启用状态
+- 认证状态
+- 对应操作按钮：登录、重新登录、删除、创建实例
 
-## 安全考虑
+按钮建议：
 
-### 令牌存储
+- `not_logged_in`: 显示“登录”
+- `logged_in`: 显示“创建实例”
+- `auth_invalid`: 显示“重新登录”
 
-- 令牌缓存文件存储在本地 `.session/` 目录
-- 建议不要将此目录提交到版本控制
-- 敏感信息（如 refresh_token）应妥善保管
+### 登录弹窗
 
-### SSL/TLS
+建议展示：
 
-所有 Minecraft API 请求均使用 HTTPS：
+- 账号 ID
+- `user_code`
+- 授权地址
+- 倒计时（基于 `expires_in`）
+- 当前轮询状态文案
 
-```go
-client := &http.Client{
-    Timeout: 30 * time.Second,
-    Transport: &http.Transport{
-        TLSClientConfig: &tls.Config{
-            MinVersion: tls.VersionTLS12,
-        },
-    },
-}
-```
+## 7. 常见对接问题
 
-### 证书处理
+### 为什么账号已存在，但不能创建实例？
 
-玩家证书存储格式：
+因为账号资源存在不等于账号已登录。账号只是 metadata，实例创建还要求认证状态为 `logged_in`。
 
-```go
-// 解析 PEM 格式私钥
-func parsePrivateKeyPEM(pemData string) (*rsa.PrivateKey, error) {
-    block, _ := pem.Decode([]byte(pemData))
-    
-    // 尝试 PKCS#1
-    if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-        return key, nil
-    }
-    
-    // 尝试 PKCS#8
-    if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-        return key.(*rsa.PrivateKey), nil
-    }
-    
-    return nil, fmt.Errorf("不支持的私钥格式")
-}
-```
+### 为什么 `has_token=true` 还需要重新登录？
 
-## 错误处理
+因为 `auth_invalid` 也可能带有旧记录。前端应以 `auth_status` 为准。
 
-### 常见错误
+### 登录成功后要不要重新拉账号列表？
 
-| 错误 | 原因 | 解决方案 |
-|------|------|----------|
-| 设备码超时 | 用户未在有效期内完成登录 | 重新启动认证流程 |
-| 令牌过期 | Access Token 已过期 | 使用 Refresh Token 刷新 |
-| 游戏所有权验证失败 | 账号未拥有 Minecraft | 购买游戏 |
-| 会话加入失败 | 服务器验证失败 | 检查网络连接 |
+要。登录成功后，建议立刻刷新：
 
-### 重试策略
+- `GET /api/accounts`
+- 如果当前页面只看单账号，也可以调用 `GET /api/accounts/:id`
 
-```go
-// 令牌刷新失败后回退到设备码登录
-if cache.HasMicrosoftRefreshToken() {
-    msToken, err := RefreshMicrosoftToken(cache.Microsoft.RefreshToken)
-    if err != nil {
-        logx.Warnf("refresh_token 刷新失败，回退设备码授权: %v", err)
-    }
-}
+## 8. 相关文档
 
-// 完整重新认证
-msToken, err := GetMicrosoftToken()
-if err != nil {
-    return fmt.Errorf("Microsoft 登录失败: %w", err)
-}
-```
-
-## 代码位置
-
-```
-internal/
-├── auth/
-│   ├── microsoft/
-│   │   └── service.go    # 微软/Xbox/XSTS 认证
-│   └── minecraft/
-│       └── service.go    # Minecraft 认证、会话加入、证书获取
-└── session/
-    └── cache.go          # 令牌缓存读写
-```
+- `docs/api.md`: 完整 API 接口文档
+- `docs/reference.md`: 配置、存储和运行参考
