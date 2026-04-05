@@ -2,8 +2,6 @@ package logx
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -87,39 +85,4 @@ func NewAuthEvent(level, action, message, instanceID, accountID, authError, resu
 		AuthError:  authError,
 		Result:     result,
 	}
-}
-
-type structuredWriter struct {
-	file *os.File
-}
-
-func newStructuredWriter(activePath string, _ int64, _ int) (*structuredWriter, error) {
-	if err := os.MkdirAll(filepath.Dir(activePath), 0o755); err != nil {
-		return nil, fmt.Errorf("create structured log directory: %w", err)
-	}
-
-	file, err := os.OpenFile(activePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open structured log file: %w", err)
-	}
-
-	return &structuredWriter{file: file}, nil
-}
-
-func (w *structuredWriter) Write(p []byte) (int, error) {
-	if w == nil || w.file == nil {
-		return 0, fmt.Errorf("structured writer is closed")
-	}
-
-	return w.file.Write(p)
-}
-
-func (w *structuredWriter) Close() error {
-	if w == nil || w.file == nil {
-		return nil
-	}
-
-	err := w.file.Close()
-	w.file = nil
-	return err
 }
