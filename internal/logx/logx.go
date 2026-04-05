@@ -1,6 +1,7 @@
 package logx
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -75,17 +76,22 @@ func Close() error {
 
 // Infof 输出信息日志
 func Infof(format string, args ...interface{}) {
-	logf("INFO", true, format, args...)
+	Summaryf("info", format, args...)
 }
 
 // Warnf 输出警告日志
 func Warnf(format string, args ...interface{}) {
-	logf("WARN", true, format, args...)
+	Summaryf("warn", format, args...)
 }
 
 // Errorf 输出错误日志
 func Errorf(format string, args ...interface{}) {
-	logf("ERROR", true, format, args...)
+	Summaryf("error", format, args...)
+}
+
+// Summaryf 输出摘要日志到控制台和摘要文件。
+func Summaryf(level string, format string, args ...interface{}) {
+	logf(normalizeSummaryLevel(level), true, format, args...)
 }
 
 // Debugf 输出调试日志（仅在debug模式）
@@ -101,6 +107,34 @@ func Debugf(format string, args ...interface{}) {
 
 // PacketLogf 数据包日志（空实现）
 func PacketLogf(format string, args ...interface{}) {}
+
+// Emit 写入结构化事件通道。
+func Emit(event Event) {
+	if err := event.Validate(); err != nil {
+		Warnf("event dropped: %v", err)
+		return
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		Warnf("event dropped: marshal failed: %v", err)
+		return
+	}
+
+	data = append(data, '\n')
+
+	mu.Lock()
+	writer := eventWriter
+	mu.Unlock()
+
+	if writer == nil {
+		return
+	}
+
+	if _, err := writer.Write(data); err != nil {
+		Warnf("event write degraded: %v", err)
+	}
+}
 
 // LogTokenCache 记录token缓存状态
 func LogTokenCache(tokenType string, profileName string, profileID string) {
@@ -134,6 +168,19 @@ func logf(level string, writeFile bool, format string, args ...interface{}) {
 
 	if writeFile && fileLogger != nil {
 		fileLogger.Printf("[%s] %s", level, msg)
+	}
+}
+
+func normalizeSummaryLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "DEBUG":
+		return "DEBUG"
+	case "WARN", "WARNING":
+		return "WARN"
+	case "ERROR":
+		return "ERROR"
+	default:
+		return "INFO"
 	}
 }
 

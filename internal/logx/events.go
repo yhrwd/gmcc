@@ -1,6 +1,7 @@
 package logx
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -43,6 +44,62 @@ func (e Event) Validate() error {
 	}
 
 	return nil
+}
+
+// MarshalJSON 输出包含扩展字段的结构化事件。
+func (e Event) MarshalJSON() ([]byte, error) {
+	payload := make(map[string]any, len(e.Fields)+10)
+
+	ts := e.Timestamp
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	} else {
+		ts = ts.UTC()
+	}
+	payload["ts"] = ts
+
+	level := strings.ToLower(strings.TrimSpace(e.Level))
+	if level == "" {
+		level = "info"
+	}
+	payload["level"] = level
+	payload["event_type"] = e.EventType
+	payload["action"] = e.Action
+
+	if e.Message != "" {
+		payload["message"] = e.Message
+	}
+	if e.InstanceID != "" {
+		payload["instance_id"] = e.InstanceID
+	}
+	if e.AccountID != "" {
+		payload["account_id"] = e.AccountID
+	}
+	if e.PlayerID != "" {
+		payload["player_id"] = e.PlayerID
+	}
+	if e.Reason != "" {
+		payload["reason"] = e.Reason
+	}
+	if e.AuthError != "" {
+		payload["auth_error"] = e.AuthError
+	}
+	if e.Result != "" {
+		payload["result"] = e.Result
+	}
+
+	for key, value := range e.Fields {
+		normalizedKey := strings.TrimSpace(key)
+		if normalizedKey == "" {
+			continue
+		}
+		if _, exists := payload[normalizedKey]; exists {
+			continue
+		}
+		payload[normalizedKey] = value
+	}
+
+	return json.Marshal(payload)
 }
 
 // NewLifecycleEvent 创建实例生命周期事件。
