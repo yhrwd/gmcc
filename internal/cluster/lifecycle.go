@@ -4,7 +4,6 @@ type StartTrigger string
 
 const (
 	StartTriggerManualStart   StartTrigger = "manual_start"
-	StartTriggerManualRestart StartTrigger = "manual_restart"
 	StartTriggerAutoReconnect StartTrigger = "auto_reconnect"
 )
 

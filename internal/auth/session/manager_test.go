@@ -25,7 +25,10 @@ func TestAuthManager_GetSessionSingleFlightRefresh(t *testing.T) {
 			ProfileName:          "Steve",
 		},
 	}
-	store := newFakeTokenStore()
+	store := newFakeRecordStore(&AccountAuthRecord{
+		AccountID: "acc-main",
+		Microsoft: MicrosoftCredential{RefreshToken: "refresh-token"},
+	})
 	mgr := NewAuthManager(store, provider)
 
 	var wg sync.WaitGroup
@@ -43,6 +46,142 @@ func TestAuthManager_GetSessionSingleFlightRefresh(t *testing.T) {
 	}
 }
 
+func TestAuthManager_GetAccountAuthStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		record *AccountAuthRecord
+		want   AccountAuthStatus
+	}{
+		{name: "missing", record: nil, want: AccountAuthStatusNotLoggedIn},
+		{
+			name: "valid refresh token",
+			record: &AccountAuthRecord{
+				AccountID: "acc",
+				Microsoft: MicrosoftCredential{RefreshToken: "rtok"},
+			},
+			want: AccountAuthStatusLoggedIn,
+		},
+		{
+			name: "history only",
+			record: &AccountAuthRecord{
+				AccountID: "acc",
+				Minecraft: MinecraftSessionState{ProfileID: "uuid", ProfileName: "Steve"},
+			},
+			want: AccountAuthStatusNotLoggedIn,
+		},
+		{
+			name: "last auth error without refresh token",
+			record: &AccountAuthRecord{
+				AccountID:     "acc",
+				LastAuthError: ErrRefreshTokenInvalid.Error(),
+			},
+			want: AccountAuthStatusAuthInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeRecordStore(tt.record)
+			mgr := NewAuthManager(store, newFakeProvider())
+
+			got, err := mgr.GetAccountAuthStatus("acc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("want %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestAuthManager_GetAccountProfile(t *testing.T) {
+	store := newFakeRecordStore(&AccountAuthRecord{
+		AccountID: "acc-main",
+		Minecraft: MinecraftSessionState{ProfileID: "uuid-main", ProfileName: "Steve"},
+	})
+	mgr := NewAuthManager(store, newFakeProvider())
+
+	profile, err := mgr.GetAccountProfile("acc-main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.ProfileID != "uuid-main" || profile.ProfileName != "Steve" {
+		t.Fatalf("unexpected profile: %+v", profile)
+	}
+}
+
+func TestClassifyAuthRecord(t *testing.T) {
+	tests := []struct {
+		name   string
+		record *AccountAuthRecord
+		want   AccountAuthStatus
+	}{
+		{name: "missing", record: nil, want: AccountAuthStatusNotLoggedIn},
+		{
+			name: "valid refresh token",
+			record: &AccountAuthRecord{
+				AccountID: "acc",
+				Microsoft: MicrosoftCredential{RefreshToken: "rtok"},
+			},
+			want: AccountAuthStatusLoggedIn,
+		},
+		{
+			name: "history only",
+			record: &AccountAuthRecord{
+				AccountID: "acc",
+				Minecraft: MinecraftSessionState{ProfileID: "uuid", ProfileName: "Steve"},
+			},
+			want: AccountAuthStatusNotLoggedIn,
+		},
+		{
+			name: "last auth error without refresh token",
+			record: &AccountAuthRecord{
+				AccountID:     "acc",
+				LastAuthError: ErrRefreshTokenInvalid.Error(),
+			},
+			want: AccountAuthStatusAuthInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyAuthRecord(tt.record); got != tt.want {
+				t.Fatalf("want %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestAccountAuthRecord_ToAuthSession(t *testing.T) {
+	record := &AccountAuthRecord{
+		AccountID: "acc-main",
+		Microsoft: MicrosoftCredential{
+			ExpiresAt: time.Now().UTC().Add(30 * time.Minute),
+		},
+		Minecraft: MinecraftSessionState{
+			AccessToken: "mc-token",
+			ExpiresAt:   time.Now().UTC().Add(10 * time.Minute),
+			ProfileID:   "player-uuid",
+			ProfileName: "Steve",
+		},
+	}
+
+	session := record.ToAuthSession(AuthSourceCache)
+	if session.AccountID != "acc-main" {
+		t.Fatalf("want account id acc-main, got %q", session.AccountID)
+	}
+	if session.MinecraftAccessToken != "mc-token" {
+		t.Fatalf("want minecraft token mc-token, got %q", session.MinecraftAccessToken)
+	}
+	if session.ProfileID != "player-uuid" || session.ProfileName != "Steve" {
+		t.Fatalf("unexpected profile data: %+v", session)
+	}
+	if session.Source != AuthSourceCache {
+		t.Fatalf("want source %s, got %s", AuthSourceCache, session.Source)
+	}
+}
+
 func TestAuthManager_DeviceLoginStatusLifecycle(t *testing.T) {
 	provider := newFakeProvider()
 	provider.deviceLoginInfo = DeviceLoginInfo{
@@ -53,7 +192,7 @@ func TestAuthManager_DeviceLoginStatusLifecycle(t *testing.T) {
 		PollInterval:    10 * time.Millisecond,
 	}
 	provider.pollResults = []fakePollResult{{err: errAuthorizationPending}}
-	store := newFakeTokenStore()
+	store := newFakeRecordStore()
 	mgr := NewAuthManager(store, provider)
 
 	if _, err := mgr.BeginDeviceLogin(context.Background(), "acc-main"); err != nil {
@@ -169,7 +308,10 @@ func TestAuthManager_DeviceLoginTransitions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := newFakeProvider()
 			tt.setupProvider(provider)
-			mgr := NewAuthManager(newFakeTokenStore(), provider)
+			mgr := NewAuthManager(newFakeRecordStore(&AccountAuthRecord{
+				AccountID: "acc-main",
+				Microsoft: MicrosoftCredential{RefreshToken: "refresh-token"},
+			}), provider)
 
 			if _, err := mgr.BeginDeviceLogin(context.Background(), "acc-main"); err != nil {
 				t.Fatalf("begin device login: %v", err)
@@ -213,7 +355,10 @@ func TestAuthManager_DeviceLoginTransitions(t *testing.T) {
 func TestAuthManager_ProviderUnavailableNormalizesToAuthFailed(t *testing.T) {
 	provider := newFakeProvider()
 	provider.refreshErr = errors.New("upstream unavailable")
-	mgr := NewAuthManager(newFakeTokenStore(), provider)
+	mgr := NewAuthManager(newFakeRecordStore(&AccountAuthRecord{
+		AccountID: "acc-main",
+		Microsoft: MicrosoftCredential{RefreshToken: "refresh-token"},
+	}), provider)
 
 	_, err := mgr.Refresh(context.Background(), "acc-main")
 	if !errors.Is(err, ErrRefreshUpstream) {
@@ -231,10 +376,10 @@ func TestAuthManager_GetSessionUsesValidMicrosoftAccessWithoutRefreshToken(t *te
 			ProfileName:          "Steve",
 		},
 	}
-	store := newFakeTokenStore()
-	store.caches["acc-main"] = &TokenCache{
+	store := newFakeRecordStore()
+	store.records["acc-main"] = &AccountAuthRecord{
 		AccountID: "acc-main",
-		Microsoft: MicrosoftTokenCache{
+		Microsoft: MicrosoftCredential{
 			AccessToken: "ms-access",
 			ExpiresAt:   time.Now().Add(10 * time.Minute),
 		},
@@ -256,18 +401,21 @@ func TestAuthManager_GetSessionUsesValidMicrosoftAccessWithoutRefreshToken(t *te
 func TestAuthManager_PersistsLastAuthError(t *testing.T) {
 	provider := newFakeProvider()
 	provider.refreshErr = errors.New("invalid_grant")
-	store := newFakeTokenStore()
+	store := newFakeRecordStore(&AccountAuthRecord{
+		AccountID: "acc-main",
+		Microsoft: MicrosoftCredential{RefreshToken: "refresh-token"},
+	})
 	mgr := NewAuthManager(store, provider)
 
 	_, err := mgr.Refresh(context.Background(), "acc-main")
 	if !errors.Is(err, ErrRefreshTokenInvalid) {
 		t.Fatalf("want ErrRefreshTokenInvalid, got %v", err)
 	}
-	cache, loadErr := store.Load("acc-main")
+	record, loadErr := store.GetAccount("acc-main")
 	if loadErr != nil {
-		t.Fatalf("load cache: %v", loadErr)
+		t.Fatalf("load record: %v", loadErr)
 	}
-	if cache.LastAuthError == "" {
+	if record.LastAuthError == "" {
 		t.Fatalf("expected LastAuthError to be persisted")
 	}
 }
@@ -285,10 +433,10 @@ func TestAuthManager_EmitsAuthEvents(t *testing.T) {
 			name: "cache hit",
 			action: func(t *testing.T, mgr *AuthManager) {
 				t.Helper()
-				store := mgr.store.(*fakeTokenStore)
-				store.caches["acc-main"] = &TokenCache{
+				store := mgr.store.(*fakeRecordStore)
+				store.records["acc-main"] = &AccountAuthRecord{
 					AccountID: "acc-main",
-					Minecraft: MinecraftTokenCache{
+					Minecraft: MinecraftSessionState{
 						AccessToken: "mc-cache",
 						ProfileID:   "uuid-cache",
 						ProfileName: "Steve",
@@ -372,7 +520,10 @@ func TestAuthManager_EmitsAuthEvents(t *testing.T) {
 					ProfileName:          "Steve",
 				},
 			}
-			mgr := NewAuthManager(newFakeTokenStore(), provider)
+			mgr := NewAuthManager(newFakeRecordStore(&AccountAuthRecord{
+				AccountID: "acc-main",
+				Microsoft: MicrosoftCredential{RefreshToken: "refresh-token"},
+			}), provider)
 
 			tt.action(t, mgr)
 
@@ -413,8 +564,8 @@ func TestAuthManager_ClearRemovesCacheAndFlowState(t *testing.T) {
 		ExpiresAt:       time.Now().Add(2 * time.Second),
 		PollInterval:    20 * time.Millisecond,
 	}
-	store := newFakeTokenStore()
-	store.caches["acc-main"] = &TokenCache{AccountID: "acc-main", LastAuthError: "old"}
+	store := newFakeRecordStore()
+	store.records["acc-main"] = &AccountAuthRecord{AccountID: "acc-main", LastAuthError: "old"}
 	mgr := NewAuthManager(store, provider)
 
 	if _, err := mgr.BeginDeviceLogin(context.Background(), "acc-main"); err != nil {
@@ -423,12 +574,9 @@ func TestAuthManager_ClearRemovesCacheAndFlowState(t *testing.T) {
 	if err := mgr.Clear("acc-main"); err != nil {
 		t.Fatalf("clear auth state: %v", err)
 	}
-	cache, err := store.Load("acc-main")
-	if err != nil {
-		t.Fatalf("load cache after clear: %v", err)
-	}
-	if cache.LastAuthError != "" || cache.AccountID != "acc-main" {
-		t.Fatalf("expected empty cache after clear, got %+v", cache)
+	_, err := store.GetAccount("acc-main")
+	if !errors.Is(err, ErrAccountNotFound) {
+		t.Fatalf("expected account to be deleted, got %v", err)
 	}
 	status, _, statusErr := mgr.GetDeviceLoginStatus("acc-main")
 	if status != DeviceLoginStatusFailed || !errors.Is(statusErr, ErrDeviceLoginRequired) {
@@ -446,10 +594,10 @@ func TestAuthManager_GetSessionSingleFlightsValidMicrosoftAccessPath(t *testing.
 			ProfileName:          "Steve",
 		},
 	}
-	store := newFakeTokenStore()
-	store.caches["acc-main"] = &TokenCache{
+	store := newFakeRecordStore()
+	store.records["acc-main"] = &AccountAuthRecord{
 		AccountID: "acc-main",
-		Microsoft: MicrosoftTokenCache{
+		Microsoft: MicrosoftCredential{
 			AccessToken: "ms-access",
 			ExpiresAt:   time.Now().Add(10 * time.Minute),
 		},
@@ -471,42 +619,48 @@ func TestAuthManager_GetSessionSingleFlightsValidMicrosoftAccessPath(t *testing.
 	}
 }
 
-func newFakeTokenStore() *fakeTokenStore {
-	return &fakeTokenStore{caches: map[string]*TokenCache{}}
+func newFakeRecordStore(records ...*AccountAuthRecord) *fakeRecordStore {
+	store := &fakeRecordStore{records: map[string]*AccountAuthRecord{}}
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		copy := *record
+		store.records[record.AccountID] = &copy
+	}
+	return store
 }
 
-type fakeTokenStore struct {
-	mu     sync.Mutex
-	caches map[string]*TokenCache
+type fakeRecordStore struct {
+	mu      sync.Mutex
+	records map[string]*AccountAuthRecord
 }
 
-func (f *fakeTokenStore) Load(accountID string) (*TokenCache, error) {
+func (f *fakeRecordStore) GetAccount(accountID string) (*AccountAuthRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if cache, ok := f.caches[accountID]; ok {
-		copy := *cache
+	if record, ok := f.records[accountID]; ok {
+		copy := *record
 		return &copy, nil
 	}
-	return &TokenCache{
-		AccountID: accountID,
-		Microsoft: MicrosoftTokenCache{
-			RefreshToken: "refresh-token",
-		},
-	}, nil
+	return nil, ErrAccountNotFound
 }
 
-func (f *fakeTokenStore) Save(accountID string, cache *TokenCache) error {
+func (f *fakeRecordStore) PutAccount(record *AccountAuthRecord) error {
+	if record == nil {
+		return errors.New("record is nil")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	copy := *cache
-	f.caches[accountID] = &copy
+	copy := *record
+	f.records[record.AccountID] = &copy
 	return nil
 }
 
-func (f *fakeTokenStore) Delete(accountID string) error {
+func (f *fakeRecordStore) DeleteAccount(accountID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.caches, accountID)
+	delete(f.records, accountID)
 	return nil
 }
 

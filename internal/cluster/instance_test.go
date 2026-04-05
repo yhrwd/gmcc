@@ -18,7 +18,7 @@ func TestInstance_StartTriggerRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inst := newInstance("i1", AccountEntry{ID: "i1", PlayerID: "p1"}, nil)
+			inst := newInstance("i1", AccountEntry{ID: "i1"}, nil)
 			inst.status = tt.status
 			inst.startRunnerFn = func(_ uint64) error {
 				return nil
@@ -33,7 +33,7 @@ func TestInstance_StartTriggerRules(t *testing.T) {
 }
 
 func TestInstance_RejectsStaleVersionEvent(t *testing.T) {
-	inst := newInstance("i1", AccountEntry{ID: "i1", PlayerID: "p1"}, nil)
+	inst := newInstance("i1", AccountEntry{ID: "i1"}, nil)
 	inst.version = 7
 	inst.runVersion = 7
 	inst.status = StatusRunning

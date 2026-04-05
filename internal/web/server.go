@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,53 +10,41 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/cluster"
 	"gmcc/internal/logx"
+	"gmcc/internal/resource"
+	"gmcc/internal/state"
 	"gmcc/internal/web/audit"
-	"gmcc/internal/web/auth"
-	"gmcc/internal/web/key"
-	"gmcc/internal/web/vault"
 	"gmcc/internal/webtypes"
 )
 
 // Server Web服务器
 type Server struct {
-	config         webtypes.WebConfig
-	configPath     string // Web配置文件路径
-	router         *gin.Engine
-	httpServer     *http.Server
-	clusterManager *cluster.Manager
-	authManager    *auth.Manager
-	tokenVault     *vault.Vault
-	auditLogger    *audit.Logger
-	keyManager     *key.Manager
+	config          webtypes.WebConfig
+	configPath      string // Web配置文件路径
+	router          *gin.Engine
+	httpServer      *http.Server
+	clusterManager  *cluster.Manager
+	resourceManager accountReader
+	runtimeAuth     *authsession.AuthManager
+	auditLogger     *audit.Logger
+}
+
+type accountReader interface {
+	ListAccounts() ([]resource.AccountRecord, error)
+	GetAccount(accountID string) (resource.AccountRecord, error)
+	CreateAccount(in resource.CreateAccountInput) (state.AccountMeta, error)
+	DeleteAccount(accountID string) error
 }
 
 // NewServer 创建Web服务器
-func NewServer(config webtypes.WebConfig, configPath string, clusterManager *cluster.Manager) (*Server, error) {
-	// 创建认证管理器
-	authManager, err := auth.NewManager(config.Auth)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create auth manager: %w", err)
-	}
-
-	// 创建密钥管理器
-	keyManager := key.NewManager()
-
-	// 创建Token Vault
-	keyGetter := keyManager.GetKeyGetter(
-		config.TokenVault.ScryptN,
-		config.TokenVault.ScryptR,
-		config.TokenVault.ScryptP,
-		32,
-	)
-	tokenVault := vault.NewVault(config.TokenVault, keyGetter)
-
+func NewServer(config webtypes.WebConfig, configPath string, clusterManager *cluster.Manager, resourceManager accountReader, runtimeAuth *authsession.AuthManager) (*Server, error) {
 	// 创建审计日志管理器
 	logDir := "logs/audit"
 	auditLogger, err := audit.NewLogger(logDir, config.Auth.AuditLogRetentionDays)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create audit logger: %w", err)
+		return nil, err
 	}
 
 	// 设置Gin模式
@@ -72,14 +59,13 @@ func NewServer(config webtypes.WebConfig, configPath string, clusterManager *clu
 	router.RedirectFixedPath = false
 
 	server := &Server{
-		config:         config,
-		configPath:     configPath,
-		router:         router,
-		clusterManager: clusterManager,
-		authManager:    authManager,
-		tokenVault:     tokenVault,
-		auditLogger:    auditLogger,
-		keyManager:     keyManager,
+		config:          config,
+		configPath:      configPath,
+		router:          router,
+		clusterManager:  clusterManager,
+		resourceManager: resourceManager,
+		runtimeAuth:     runtimeAuth,
+		auditLogger:     auditLogger,
 	}
 
 	// 设置路由
@@ -102,33 +88,24 @@ func (s *Server) setupRoutes() {
 		api.GET("/status", s.handleGetStatus)
 		api.GET("/accounts", s.handleGetAccounts)
 		api.GET("/accounts/:id", s.handleGetAccount)
+		api.GET("/instances", s.handleGetInstances)
+		api.GET("/instances/:id", s.handleGetInstance)
 
 		// 认证API
-		api.POST("/auth/verify", s.handleAuthVerify)
 		api.POST("/auth/microsoft/init", s.handleMicrosoftAuthInit)
 		api.POST("/auth/microsoft/poll", s.handleMicrosoftAuthPoll)
 
-		// 受保护API（需要密码验证）
-		protected := api.Group("")
-		protected.Use(s.passwordAuthMiddleware())
-		{
-			// 实例操作
-			protected.POST("/instances/:id/start", s.handleStartInstance)
-			protected.POST("/instances/:id/stop", s.handleStopInstance)
-			protected.POST("/instances/:id/restart", s.handleRestartInstance)
-			protected.DELETE("/instances/:id", s.handleDeleteInstance)
-
-			// 账号管理
-			protected.POST("/accounts", s.handleCreateAccount)
-			protected.DELETE("/accounts/:id", s.handleDeleteAccount)
-
-			// 密码管理
-			protected.POST("/passwords", s.handleCreatePassword)
-			protected.DELETE("/passwords/:id", s.handleDeletePassword)
-		}
+		// 写操作API（无认证）
+		api.POST("/instances", s.handleCreateInstance)
+		api.POST("/instances/:id/start", s.handleStartInstance)
+		api.POST("/instances/:id/stop", s.handleStopInstance)
+		api.POST("/instances/:id/restart", s.handleRestartInstance)
+		api.DELETE("/instances/:id", s.handleDeleteInstance)
+		api.POST("/accounts", s.handleCreateAccount)
+		api.DELETE("/accounts/:id", s.handleDeleteAccount)
 
 		// 日志API
-		api.GET("/logs/operations", s.passwordAuthMiddleware(), s.handleGetOperationLogs)
+		api.GET("/logs/operations", s.handleGetOperationLogs)
 	}
 
 	// API 模式 - 只提供 API 服务，不提供前端静态文件
@@ -185,35 +162,6 @@ func (s *Server) corsMiddleware() gin.HandlerFunc {
 	}
 }
 
-// passwordAuthMiddleware 密码认证中间件
-func (s *Server) passwordAuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req webtypes.OperationRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(401, webtypes.OperationResponse{
-				Success: false,
-				Error:   "password required",
-			})
-			c.Abort()
-			return
-		}
-
-		passwordID, err := s.authManager.VerifyPassword(req.Password)
-		if err != nil {
-			c.JSON(401, webtypes.OperationResponse{
-				Success: false,
-				Error:   "invalid password",
-			})
-			c.Abort()
-			return
-		}
-
-		// 将password_id存入上下文
-		c.Set("password_id", passwordID)
-		c.Next()
-	}
-}
-
 // Run 启动服务器
 func (s *Server) Run() error {
 	s.httpServer = &http.Server{
@@ -244,41 +192,10 @@ func (s *Server) Run() error {
 	return s.httpServer.Shutdown(ctx)
 }
 
-// GetClusterManager 获取集群管理器
-func (s *Server) GetClusterManager() *cluster.Manager {
-	return s.clusterManager
-}
-
-// GetAuthManager 获取认证管理器
-func (s *Server) GetAuthManager() *auth.Manager {
-	return s.authManager
-}
-
-// GetTokenVault 获取Token Vault
-func (s *Server) GetTokenVault() *vault.Vault {
-	return s.tokenVault
-}
-
-// GetAuditLogger 获取审计日志管理器
-func (s *Server) GetAuditLogger() *audit.Logger {
-	return s.auditLogger
-}
-
-// GetKeyManager 获取密钥管理器
-func (s *Server) GetKeyManager() *key.Manager {
-	return s.keyManager
-}
-
 // logOperation 记录操作日志
 func (s *Server) logOperation(c *gin.Context, action string, targetInstanceID, targetAccountID string, success bool, errMsg string) {
-	passwordID, _ := c.Get("password_id")
-	if passwordID == nil {
-		passwordID = ""
-	}
-
 	log := &webtypes.OperationLog{
 		Timestamp:        time.Now(),
-		PasswordID:       passwordID.(string),
 		Action:           action,
 		TargetInstanceID: targetInstanceID,
 		TargetAccountID:  targetAccountID,

@@ -25,8 +25,6 @@ import (
 	"gmcc/internal/mcclient/protocol"
 )
 
-var errOnlineAuthRequired = errors.New("online auth required")
-
 type onlineSession struct {
 	AccessToken string
 	ProfileID   string
@@ -164,9 +162,6 @@ func (p *Player) GetOnlineDuration() time.Duration {
 type Client struct {
 	cfg *config.Config
 
-	offlineName string
-	offlineUUID [16]byte
-
 	username string
 	uuid     [16]byte
 
@@ -186,13 +181,8 @@ type Client struct {
 }
 
 func New(cfg *config.Config) *Client {
-	name := strings.TrimSpace(cfg.Account.PlayerID)
 	return &Client{
 		cfg:         cfg,
-		offlineName: name,
-		offlineUUID: packet.OfflineUUID(name),
-		username:    name,
-		uuid:        packet.OfflineUUID(name),
 		Player:      NewPlayer(),
 		accountID:   strings.TrimSpace(cfg.ClusterRuntime.AccountID),
 		authManager: cfg.ClusterRuntime.AuthManager,
@@ -204,42 +194,24 @@ func (c *Client) IsReady() bool {
 }
 
 func (c *Client) Run(ctx context.Context) error {
-	if strings.TrimSpace(c.offlineName) == "" {
-		return fmt.Errorf("account.player_id 不能为空")
-	}
 	logx.Infof("客户端协议: %s", protocol.Label)
 	host, port, err := packet.ParseAddress(c.cfg.Server.Address)
 	if err != nil {
 		return err
 	}
 
-	if c.cfg.Account.UseOfficialAuth {
-		logx.Summaryf("info", "已启用正版认证 (account.use_official_auth=true)")
-		if err := c.prepareOnlineSession(); err != nil {
-			return err
-		}
-		return c.connectAndLoop(ctx, host, port, true)
+	if err := c.prepareOnlineSession(); err != nil {
+		return err
 	}
-
-	logx.Summaryf("info", "使用离线模式 (account.use_official_auth=false)")
-	err = c.connectAndLoop(ctx, host, port, false)
-	if errors.Is(err, errOnlineAuthRequired) {
-		return fmt.Errorf("服务器要求正版会话认证，请将 account.use_official_auth 设为 true")
-	}
-	return err
+	return c.connectAndLoop(ctx, host, port, true)
 }
 
 func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, useOnline bool) error {
-	if useOnline {
-		if c.online == nil {
-			return fmt.Errorf("online session 不存在")
-		}
-		c.username = c.online.ProfileName
-		c.uuid = c.online.ProfileUUID
-	} else {
-		c.username = c.offlineName
-		c.uuid = c.offlineUUID
+	if c.online == nil {
+		return fmt.Errorf("online session 不存在")
 	}
+	c.username = c.online.ProfileName
+	c.uuid = c.online.ProfileUUID
 
 	c.state = protocol.StateLogin
 	c.inPlay = false
@@ -753,7 +725,7 @@ func (c *Client) handleEncryptionRequest(data []byte) error {
 		serverID, len(publicKeyDER), len(challenge), shouldAuthenticate)
 
 	if shouldAuthenticate && c.online == nil {
-		return errOnlineAuthRequired
+		return fmt.Errorf("未获取正版认证会话，无法完成加密握手")
 	}
 
 	pubAny, err := x509.ParsePKIXPublicKey(publicKeyDER)

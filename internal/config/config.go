@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	authsession "gmcc/internal/auth/session"
@@ -13,6 +12,9 @@ import (
 
 // Config 统一配置结构
 type Config struct {
+	// 认证配置
+	Auth AuthConfig `yaml:"auth"`
+
 	// 集群配置
 	Cluster ClusterConfig `yaml:"cluster"`
 
@@ -23,11 +25,25 @@ type Config struct {
 	Log LogConfig `yaml:"log"`
 
 	// 向后兼容配置
-	Account AccountConfig `yaml:"account"`
-	Server  ServerConfig  `yaml:"server"`
+	Server ServerConfig `yaml:"server"`
 
 	// 集群运行时注入配置（不参与序列化）
 	ClusterRuntime ClusterRuntimeConfig `yaml:"-"`
+}
+
+// AuthConfig 认证配置
+type AuthConfig struct {
+	Vault AuthVaultConfig `yaml:"vault"`
+}
+
+// AuthVaultConfig 认证凭据保险库配置
+type AuthVaultConfig struct {
+	Path    string `yaml:"path"`
+	KeyEnv  string `yaml:"key_env"`
+	ScryptN int    `yaml:"scrypt_n"`
+	ScryptR int    `yaml:"scrypt_r"`
+	ScryptP int    `yaml:"scrypt_p"`
+	SaltLen int    `yaml:"salt_len"`
 }
 
 // ClusterRuntimeConfig 集群运行时配置（仅进程内使用）
@@ -59,44 +75,21 @@ type ReconnectPolicy struct {
 
 // AccountEntry 账号条目
 type AccountEntry struct {
-	ID              string `yaml:"id"`
-	PlayerID        string `yaml:"player_id"`
-	UseOfficialAuth bool   `yaml:"use_official_auth"`
-	ServerAddress   string `yaml:"server_address"`
-	Enabled         bool   `yaml:"enabled"`
+	ID            string `yaml:"id"`
+	ServerAddress string `yaml:"server_address"`
+	Enabled       bool   `yaml:"enabled"`
 }
 
 // WebConfig Web面板配置
 type WebConfig struct {
-	Bind       string `yaml:"bind"` // 监听地址
-	Auth       WebAuthConfig
-	TokenVault TokenVaultConfig
-	CORS       CORSConfig
+	Bind string        `yaml:"bind"` // 监听地址
+	Auth WebAuthConfig `yaml:"auth"`
+	CORS CORSConfig    `yaml:"cors"`
 }
 
 // WebAuthConfig Web认证配置
 type WebAuthConfig struct {
-	TokenExpiry           time.Duration   `yaml:"token_expiry"`
-	AuditLogRetentionDays int             `yaml:"audit_log_retention_days"`
-	Passwords             []PasswordEntry `yaml:"passwords"`
-}
-
-// PasswordEntry 密码条目
-type PasswordEntry struct {
-	ID        string    `yaml:"id"`
-	Hash      string    `yaml:"hash"`
-	Enabled   bool      `yaml:"enabled"`
-	CreatedAt time.Time `yaml:"created_at"`
-	Note      string    `yaml:"note,omitempty"`
-}
-
-// TokenVaultConfig Token Vault配置
-type TokenVaultConfig struct {
-	StoragePath string `yaml:"storage_path"`
-	ScryptN     int    `yaml:"scrypt_n"`
-	ScryptR     int    `yaml:"scrypt_r"`
-	ScryptP     int    `yaml:"scrypt_p"`
-	SaltLen     int    `yaml:"salt_len"`
+	AuditLogRetentionDays int `yaml:"audit_log_retention_days"`
 }
 
 // CORSConfig CORS配置
@@ -113,12 +106,6 @@ type LogConfig struct {
 	EnableFile bool   `yaml:"enable_file"`
 }
 
-// AccountConfig 账户配置（向后兼容）
-type AccountConfig struct {
-	PlayerID        string `yaml:"player_id"`
-	UseOfficialAuth bool   `yaml:"use_official_auth"`
-}
-
 // ServerConfig 服务器配置（向后兼容）
 type ServerConfig struct {
 	Address string `yaml:"address"`
@@ -132,6 +119,16 @@ func (c *LogConfig) MaxSizeInBytes() int64 {
 // Default 返回默认配置
 func Default() Config {
 	return Config{
+		Auth: AuthConfig{
+			Vault: AuthVaultConfig{
+				Path:    ".authvault",
+				KeyEnv:  "GMCC_AUTH_VAULT_KEY",
+				ScryptN: 1 << 20,
+				ScryptR: 8,
+				ScryptP: 1,
+				SaltLen: 32,
+			},
+		},
 		Cluster: ClusterConfig{
 			Global: GlobalConfig{
 				MaxInstances: 10,
@@ -148,24 +145,7 @@ func Default() Config {
 		Web: WebConfig{
 			Bind: "0.0.0.0:8080",
 			Auth: WebAuthConfig{
-				TokenExpiry:           5 * time.Minute,
 				AuditLogRetentionDays: 30,
-				Passwords: []PasswordEntry{
-					{
-						ID:        "default",
-						Hash:      "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
-						Enabled:   true,
-						CreatedAt: time.Now(),
-						Note:      "默认密码: password123",
-					},
-				},
-			},
-			TokenVault: TokenVaultConfig{
-				StoragePath: ".tokens",
-				ScryptN:     1 << 20,
-				ScryptR:     8,
-				ScryptP:     1,
-				SaltLen:     32,
 			},
 			CORS: CORSConfig{
 				Enabled: true,
@@ -221,22 +201,21 @@ func Save(path string, cfg Config) error {
 
 // generateConfigWithComments 生成带注释的配置
 func generateConfigWithComments(cfg Config) ([]byte, error) {
-	passwordsYAML, err := yaml.Marshal(cfg.Web.Auth.Passwords)
-	if err != nil {
-		return nil, fmt.Errorf("序列化密码失败: %w", err)
-	}
-
-	// 为密码 YAML 添加缩进（前缀 6 个空格）
-	indentedPasswords := ""
-	for i, line := range strings.Split(strings.TrimSpace(string(passwordsYAML)), "\n") {
-		if i > 0 {
-			indentedPasswords += "\n"
-		}
-		indentedPasswords += "      " + line
-	}
-
 	return []byte(fmt.Sprintf(`# GMCC 配置文件
 # 配置文件路径可通过环境变量 GMCC_CONFIG 指定，默认 config.yaml
+
+auth:
+  # 认证保险库配置
+  vault:
+    # 存储路径
+    path: "%s"
+    # 从环境变量读取主密钥
+    key_env: "%s"
+    # scrypt 参数
+    scrypt_n: %d
+    scrypt_r: %d
+    scrypt_p: %d
+    salt_len: %d
 
 cluster:
   # 集群全局配置
@@ -263,28 +242,12 @@ cluster:
 web:
   # Web面板监听地址
   bind: "%s"
-  
+
   # 认证配置
   auth:
-    # JWT Token 过期时间
-    token_expiry: %s
     # 审计日志保留天数
     audit_log_retention_days: %d
-    
-    # 密码列表
-    passwords:
-%s
-  
-  # Token加密配置
-  token_vault:
-    # 存储路径
-    storage_path: "%s"
-    # scrypt 参数
-    scrypt_n: %d
-    scrypt_r: %d
-    scrypt_p: %d
-    salt_len: %d
-  
+
   # CORS配置
   cors:
     enabled: %t
@@ -301,6 +264,12 @@ log:
   # 是否启用文件日志
   enable_file: %t
 `,
+		cfg.Auth.Vault.Path,
+		cfg.Auth.Vault.KeyEnv,
+		cfg.Auth.Vault.ScryptN,
+		cfg.Auth.Vault.ScryptR,
+		cfg.Auth.Vault.ScryptP,
+		cfg.Auth.Vault.SaltLen,
 		cfg.Cluster.Global.MaxInstances,
 		cfg.Cluster.Global.ReconnectPolicy.Enabled,
 		cfg.Cluster.Global.ReconnectPolicy.MaxRetries,
@@ -309,14 +278,7 @@ log:
 		cfg.Cluster.Global.ReconnectPolicy.Multiplier,
 		cfg.Cluster.Accounts,
 		cfg.Web.Bind,
-		cfg.Web.Auth.TokenExpiry,
 		cfg.Web.Auth.AuditLogRetentionDays,
-		indentedPasswords,
-		cfg.Web.TokenVault.StoragePath,
-		cfg.Web.TokenVault.ScryptN,
-		cfg.Web.TokenVault.ScryptR,
-		cfg.Web.TokenVault.ScryptP,
-		cfg.Web.TokenVault.SaltLen,
 		cfg.Web.CORS.Enabled,
 		cfg.Web.CORS.Origins,
 		cfg.Log.LogDir,
@@ -328,6 +290,25 @@ log:
 
 // fillDefaults 填充默认值
 func (c *Config) fillDefaults() {
+	if c.Auth.Vault.Path == "" {
+		c.Auth.Vault.Path = ".authvault"
+	}
+	if c.Auth.Vault.KeyEnv == "" {
+		c.Auth.Vault.KeyEnv = "GMCC_AUTH_VAULT_KEY"
+	}
+	if c.Auth.Vault.ScryptN == 0 {
+		c.Auth.Vault.ScryptN = 1 << 20
+	}
+	if c.Auth.Vault.ScryptR == 0 {
+		c.Auth.Vault.ScryptR = 8
+	}
+	if c.Auth.Vault.ScryptP == 0 {
+		c.Auth.Vault.ScryptP = 1
+	}
+	if c.Auth.Vault.SaltLen == 0 {
+		c.Auth.Vault.SaltLen = 32
+	}
+
 	// 集群默认值
 	if c.Cluster.Global.MaxInstances == 0 {
 		c.Cluster.Global.MaxInstances = 10
@@ -346,37 +327,8 @@ func (c *Config) fillDefaults() {
 	if c.Web.Bind == "" {
 		c.Web.Bind = "0.0.0.0:8080"
 	}
-	if c.Web.Auth.TokenExpiry == 0 {
-		c.Web.Auth.TokenExpiry = 5 * time.Minute
-	}
 	if c.Web.Auth.AuditLogRetentionDays == 0 {
 		c.Web.Auth.AuditLogRetentionDays = 30
-	}
-	if len(c.Web.Auth.Passwords) == 0 {
-		c.Web.Auth.Passwords = []PasswordEntry{
-			{
-				ID:        "default",
-				Hash:      "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
-				Enabled:   true,
-				CreatedAt: time.Now(),
-				Note:      "默认密码: password123",
-			},
-		}
-	}
-	if c.Web.TokenVault.StoragePath == "" {
-		c.Web.TokenVault.StoragePath = ".tokens"
-	}
-	if c.Web.TokenVault.ScryptN == 0 {
-		c.Web.TokenVault.ScryptN = 1 << 20
-	}
-	if c.Web.TokenVault.ScryptR == 0 {
-		c.Web.TokenVault.ScryptR = 8
-	}
-	if c.Web.TokenVault.ScryptP == 0 {
-		c.Web.TokenVault.ScryptP = 1
-	}
-	if c.Web.TokenVault.SaltLen == 0 {
-		c.Web.TokenVault.SaltLen = 32
 	}
 
 	// 日志默认值

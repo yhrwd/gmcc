@@ -12,12 +12,6 @@ import (
 	"gmcc/internal/logx"
 )
 
-type tokenStore interface {
-	Load(accountID string) (*TokenCache, error)
-	Save(accountID string, cache *TokenCache) error
-	Delete(accountID string) error
-}
-
 type authProvider interface {
 	MicrosoftProvider
 	MinecraftProvider
@@ -38,14 +32,14 @@ type deviceLoginFlow struct {
 }
 
 type AuthManager struct {
-	store    tokenStore
+	store    AccountRecordRepository
 	provider authProvider
 	mu       sync.Mutex
 	inflight map[string]*inflightResult
 	device   map[string]*deviceLoginFlow
 }
 
-func NewAuthManager(store tokenStore, provider authProvider) *AuthManager {
+func NewAuthManager(store AccountRecordRepository, provider authProvider) *AuthManager {
 	return &AuthManager{
 		store:    store,
 		provider: provider,
@@ -55,35 +49,57 @@ func NewAuthManager(store tokenStore, provider authProvider) *AuthManager {
 }
 
 func (m *AuthManager) GetSession(ctx context.Context, accountID string) (AuthSession, error) {
-	cache, err := m.store.Load(accountID)
+	record, err := m.loadAccountRecord(accountID)
 	if err != nil {
 		return AuthSession{}, err
 	}
 
 	now := time.Now().UTC()
-	if cache.HasValidMinecraftToken(now) {
+	if record.HasValidMinecraftSession(now) {
 		m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
-		return cache.ToAuthSession(AuthSourceCache), nil
+		return record.ToAuthSession(AuthSourceCache), nil
 	}
-	if cache.HasValidMicrosoftAccess(now) {
-		return m.singleFlightMicrosoftAccess(ctx, strings.TrimSpace(accountID), cache)
+	if record.HasValidMicrosoftAccess(now) {
+		return m.singleFlightMicrosoftAccess(ctx, strings.TrimSpace(accountID), record)
 	}
-	if !cache.HasMicrosoftRefreshToken() {
-		return AuthSession{}, m.persistAuthFailure(accountID, cache, ErrDeviceLoginRequired)
+	if !record.HasMicrosoftRefreshToken() {
+		return AuthSession{}, m.persistAuthFailure(accountID, record, ErrDeviceLoginRequired)
 	}
 
-	return m.singleFlightRefresh(ctx, strings.TrimSpace(accountID), cache)
+	return m.singleFlightRefresh(ctx, strings.TrimSpace(accountID), record)
 }
 
 func (m *AuthManager) Refresh(ctx context.Context, accountID string) (AuthSession, error) {
-	cache, err := m.store.Load(accountID)
+	record, err := m.loadAccountRecord(accountID)
 	if err != nil {
 		return AuthSession{}, err
 	}
-	if !cache.HasMicrosoftRefreshToken() {
-		return AuthSession{}, m.persistAuthFailure(accountID, cache, ErrDeviceLoginRequired)
+	if !record.HasMicrosoftRefreshToken() {
+		return AuthSession{}, m.persistAuthFailure(accountID, record, ErrDeviceLoginRequired)
 	}
-	return m.singleFlightRefresh(ctx, strings.TrimSpace(accountID), cache)
+	return m.singleFlightRefresh(ctx, strings.TrimSpace(accountID), record)
+}
+
+func (m *AuthManager) GetAccountAuthStatus(accountID string) (AccountAuthStatus, error) {
+	record, err := m.store.GetAccount(strings.TrimSpace(accountID))
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return AccountAuthStatusNotLoggedIn, nil
+		}
+		return "", err
+	}
+	return classifyAuthRecord(record), nil
+}
+
+func (m *AuthManager) GetAccountProfile(accountID string) (AccountProfile, error) {
+	record, err := m.store.GetAccount(strings.TrimSpace(accountID))
+	if err != nil {
+		return AccountProfile{}, err
+	}
+	return AccountProfile{
+		ProfileID:   strings.TrimSpace(record.Minecraft.ProfileID),
+		ProfileName: strings.TrimSpace(record.Minecraft.ProfileName),
+	}, nil
 }
 
 func (m *AuthManager) Clear(accountID string) error {
@@ -103,7 +119,7 @@ func (m *AuthManager) Clear(accountID string) error {
 	}
 	m.mu.Unlock()
 
-	if err := m.store.Delete(trimmedAccountID); err != nil {
+	if err := m.store.DeleteAccount(trimmedAccountID); err != nil {
 		return err
 	}
 
@@ -111,25 +127,25 @@ func (m *AuthManager) Clear(accountID string) error {
 	return nil
 }
 
-func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
+func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string, record *AccountAuthRecord) (AuthSession, error) {
 	return m.singleFlightSession(ctx, accountID, func() (AuthSession, error) {
-		if latest, err := m.store.Load(accountID); err == nil {
+		if latest, err := m.loadAccountRecord(accountID); err == nil {
 			now := time.Now().UTC()
-			if latest.HasValidMinecraftToken(now) {
+			if latest.HasValidMinecraftSession(now) {
 				session := latest.ToAuthSession(AuthSourceCache)
 				m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
 				return session, nil
 			}
 		}
-		return m.refreshSession(ctx, accountID, cache)
+		return m.refreshSession(ctx, accountID, record)
 	})
 }
 
-func (m *AuthManager) singleFlightMicrosoftAccess(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
+func (m *AuthManager) singleFlightMicrosoftAccess(ctx context.Context, accountID string, record *AccountAuthRecord) (AuthSession, error) {
 	return m.singleFlightSession(ctx, accountID, func() (AuthSession, error) {
-		if latest, err := m.store.Load(accountID); err == nil {
+		if latest, err := m.loadAccountRecord(accountID); err == nil {
 			now := time.Now().UTC()
-			if latest.HasValidMinecraftToken(now) {
+			if latest.HasValidMinecraftSession(now) {
 				session := latest.ToAuthSession(AuthSourceCache)
 				m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
 				return session, nil
@@ -138,7 +154,7 @@ func (m *AuthManager) singleFlightMicrosoftAccess(ctx context.Context, accountID
 				return m.completeSessionFromMicrosoft(ctx, accountID, latest.Microsoft, AuthSourceRefresh)
 			}
 		}
-		return m.completeSessionFromMicrosoft(ctx, accountID, cache.Microsoft, AuthSourceRefresh)
+		return m.completeSessionFromMicrosoft(ctx, accountID, record.Microsoft, AuthSourceRefresh)
 	})
 }
 
@@ -169,11 +185,11 @@ func (m *AuthManager) singleFlightSession(ctx context.Context, accountID string,
 	return session, err
 }
 
-func (m *AuthManager) refreshSession(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
-	msCache, err := m.provider.RefreshMicrosoft(ctx, cache.Microsoft.RefreshToken)
+func (m *AuthManager) refreshSession(ctx context.Context, accountID string, record *AccountAuthRecord) (AuthSession, error) {
+	msCache, err := m.provider.RefreshMicrosoft(ctx, record.Microsoft.RefreshToken)
 	if err != nil {
 		normalized := normalizeProviderError(err)
-		return AuthSession{}, m.persistAuthFailure(accountID, cache, normalized)
+		return AuthSession{}, m.persistAuthFailure(accountID, record, normalized)
 	}
 
 	return m.completeSessionFromMicrosoft(ctx, accountID, msCache, AuthSourceRefresh)
@@ -209,13 +225,13 @@ func (m *AuthManager) completeSessionFromMicrosoft(ctx context.Context, accountI
 	mcCache.ProfileID = strings.TrimSpace(profile.ID)
 	mcCache.ProfileName = strings.TrimSpace(profile.Name)
 
-	next := &TokenCache{
+	next := &AccountAuthRecord{
 		AccountID: strings.TrimSpace(accountID),
 		UpdatedAt: time.Now().UTC(),
 		Microsoft: msCache,
 		Minecraft: mcCache,
 	}
-	if err := m.store.Save(accountID, next); err != nil {
+	if err := m.store.PutAccount(next); err != nil {
 		return AuthSession{}, fmt.Errorf("save refreshed account token cache: %w", err)
 	}
 
@@ -478,21 +494,35 @@ func normalizeProviderError(err error) error {
 	}
 }
 
-func (m *AuthManager) persistAuthFailure(accountID string, base *TokenCache, authErr error) error {
+func (m *AuthManager) persistAuthFailure(accountID string, base *AccountAuthRecord, authErr error) error {
 	if authErr == nil {
 		return nil
 	}
 	m.emitAuthEvent("auth_failed", "account session authentication failed", accountID, authErr, "failed")
-	cache := NewTokenCache(accountID)
+	record := NewAccountAuthRecord(accountID)
 	if base != nil {
 		copy := *base
-		cache = &copy
+		record = &copy
 	}
-	cache.AccountID = strings.TrimSpace(accountID)
-	cache.LastAuthError = authErr.Error()
-	cache.UpdatedAt = time.Now().UTC()
-	if saveErr := m.store.Save(accountID, cache); saveErr != nil {
+	record.AccountID = strings.TrimSpace(accountID)
+	record.LastAuthError = authErr.Error()
+	record.UpdatedAt = time.Now().UTC()
+	if saveErr := m.store.PutAccount(record); saveErr != nil {
 		return fmt.Errorf("persist auth failure: %w", saveErr)
 	}
 	return authErr
+}
+
+func (m *AuthManager) loadAccountRecord(accountID string) (*AccountAuthRecord, error) {
+	record, err := m.store.GetAccount(strings.TrimSpace(accountID))
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return NewAccountAuthRecord(accountID), nil
+		}
+		return nil, err
+	}
+	if record == nil {
+		return NewAccountAuthRecord(accountID), nil
+	}
+	return record, nil
 }

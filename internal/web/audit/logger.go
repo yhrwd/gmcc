@@ -69,7 +69,7 @@ func (l *Logger) Log(log *webtypes.OperationLog) error {
 }
 
 // Query 查询日志
-func (l *Logger) Query(start, end time.Time, passwordID string) ([]webtypes.OperationLog, error) {
+func (l *Logger) Query(start, end time.Time) ([]webtypes.OperationLog, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -102,9 +102,6 @@ func (l *Logger) Query(start, end time.Time, passwordID string) ([]webtypes.Oper
 
 			// 过滤条件
 			if log.Timestamp.Before(start) || log.Timestamp.After(end) {
-				continue
-			}
-			if passwordID != "" && log.PasswordID != passwordID {
 				continue
 			}
 

@@ -28,6 +28,7 @@ const (
 // InstanceInfo 实例信息（可导出）
 type InstanceInfo struct {
 	ID             string         `json:"id"`
+	AccountID      string         `json:"account_id"`
 	PlayerID       string         `json:"player_id"`
 	ServerAddress  string         `json:"server_address"`
 	Status         InstanceStatus `json:"status"`
@@ -148,10 +149,6 @@ func (i *Instance) startRunnerLocked(trigger StartTrigger, runVersion uint64) er
 
 	// 创建配置
 	cfg := &config.Config{
-		Account: config.AccountConfig{
-			PlayerID:        i.Account.PlayerID,
-			UseOfficialAuth: i.Account.UseOfficialAuth,
-		},
 		Server: config.ServerConfig{
 			Address: i.Account.ServerAddress,
 		},
@@ -266,7 +263,8 @@ func (i *Instance) GetInfo() InstanceInfo {
 
 	info := InstanceInfo{
 		ID:             i.ID,
-		PlayerID:       i.Account.PlayerID,
+		AccountID:      i.Account.ID,
+		PlayerID:       i.accountProfileID(),
 		ServerAddress:  i.Account.ServerAddress,
 		Status:         i.status,
 		ReconnectCount: i.reconnectCount,
@@ -286,6 +284,9 @@ func (i *Instance) GetInfo() InstanceInfo {
 			health, _, food, _ := player.GetHealth()
 			info.Health = health
 			info.Food = food
+			if info.PlayerID == "" {
+				info.PlayerID = player.Name
+			}
 			x, y, z := player.GetPosition()
 			info.Position = &Position{X: x, Y: y, Z: z}
 		}
@@ -421,9 +422,21 @@ func (i *Instance) applyExitEvent(runVersion uint64, category ExitCategory, err 
 	return true
 }
 
+func (i *Instance) accountProfileID() string {
+	if i.authManager == nil {
+		return ""
+	}
+
+	profile, err := i.authManager.GetAccountProfile(i.Account.ID)
+	if err != nil {
+		return ""
+	}
+	return profile.ProfileID
+}
+
 func (i *Instance) emitLifecycleEvent(level, action, message, reason string, fields map[string]any) {
 	event := logx.NewLifecycleEvent(level, action, message, i.ID, i.Account.ID)
-	event.PlayerID = i.Account.PlayerID
+	event.PlayerID = i.accountProfileID()
 	if strings.TrimSpace(reason) != "" {
 		event.Reason = reason
 	}

@@ -8,12 +8,14 @@ import (
 	"time"
 
 	authsession "gmcc/internal/auth/session"
+	appconfig "gmcc/internal/config"
 	"gmcc/internal/logx"
+	"gmcc/internal/resource"
+	"gmcc/internal/state"
 )
 
 var (
 	ErrInstanceNotFound = errors.New("instance not found")
-	ErrInstanceRunning  = errors.New("instance already running")
 	ErrMaxInstances     = errors.New("max instances reached")
 )
 
@@ -37,6 +39,15 @@ type Manager struct {
 	cancel context.CancelFunc
 
 	authManager *authsession.AuthManager
+	resourceMgr resourceService
+}
+
+type resourceService interface {
+	CreateAccount(in resource.CreateAccountInput) (state.AccountMeta, error)
+	CreateInstance(in resource.CreateInstanceInput) (state.InstanceMeta, error)
+	DeleteAccount(accountID string) error
+	DeleteInstance(instanceID string) error
+	RestoreResources() (resource.RestoreResourcesResult, error)
 }
 
 // NewManager 创建集群管理器
@@ -62,9 +73,21 @@ func NewManager(config ClusterConfig, authManager *authsession.AuthManager, conf
 	return m
 }
 
+// SetResourceManager 设置资源管理器
+func (m *Manager) SetResourceManager(resourceManager resourceService) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resourceMgr = resourceManager
+}
+
 // Start 启动集群管理器
 func (m *Manager) Start() error {
 	logx.Infof("集群管理器启动: max_instances=%d", m.config.Global.MaxInstances)
+	if m.resourceMgr != nil {
+		if err := m.RestoreInstances(); err != nil {
+			return err
+		}
+	}
 	// 设计约束：启动管理器不自动拉起实例，仅通过 API/命令显式启动
 	return nil
 }
@@ -123,12 +146,33 @@ func (m *Manager) Stop() error {
 
 // CreateInstance 创建实例
 func (m *Manager) CreateInstance(id string, account AccountEntry) error {
+	if m.resourceMgr != nil {
+		meta, err := m.resourceMgr.CreateInstance(resource.CreateInstanceInput{
+			InstanceID:    id,
+			AccountID:     account.ID,
+			ServerAddress: account.ServerAddress,
+			Enabled:       account.Enabled,
+		})
+		if err != nil {
+			return err
+		}
+
+		account.ID = meta.AccountID
+		account.ServerAddress = meta.ServerAddress
+		account.Enabled = meta.Enabled
+		return m.createRuntimeInstance(meta.InstanceID, account)
+	}
+
+	return m.createRuntimeInstance(id, account)
+}
+
+func (m *Manager) createRuntimeInstance(id string, account AccountEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// 检查是否已存在
 	if _, exists := m.instances[id]; exists {
-		return fmt.Errorf("instance %s already exists", id)
+		return fmt.Errorf("%w: %s", resource.ErrInstanceAlreadyExists, id)
 	}
 
 	// 检查最大实例数
@@ -141,8 +185,61 @@ func (m *Manager) CreateInstance(id string, account AccountEntry) error {
 	inst.authManager = m.authManager
 	m.instances[id] = inst
 
-	logx.Infof("实例已创建: %s (player_id=%s)", id, account.PlayerID)
+	logx.Infof("实例已创建: %s (account_id=%s)", id, account.ID)
 	return nil
+}
+
+// RestoreInstances 从资源元数据恢复内存中的实例对象（不自动启动）
+func (m *Manager) RestoreInstances() error {
+	m.mu.RLock()
+	resourceMgr := m.resourceMgr
+	m.mu.RUnlock()
+
+	if resourceMgr == nil {
+		return nil
+	}
+
+	result, err := resourceMgr.RestoreResources()
+	if err != nil {
+		return fmt.Errorf("restore resources: %w", err)
+	}
+
+	for _, meta := range result.RestoredInstances {
+		account := m.accountForRestoredInstance(meta)
+		if err := m.createRuntimeInstance(meta.InstanceID, account); err != nil {
+			if errors.Is(err, resource.ErrInstanceAlreadyExists) {
+				continue
+			}
+			return fmt.Errorf("materialize restored instance %q: %w", meta.InstanceID, err)
+		}
+	}
+
+	if result.RestoredCount > 0 || result.SkippedCount > 0 {
+		logx.Infof("集群实例恢复完成: restored=%d skipped=%d", result.RestoredCount, result.SkippedCount)
+	}
+	return nil
+}
+
+func (m *Manager) accountForRestoredInstance(meta state.InstanceMeta) AccountEntry {
+	account := AccountEntry{
+		ID:            meta.AccountID,
+		ServerAddress: meta.ServerAddress,
+		Enabled:       meta.Enabled,
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, configured := range m.config.Accounts {
+		if configured.ID == meta.AccountID {
+			if configured.ServerAddress != "" {
+				account.ServerAddress = configured.ServerAddress
+			}
+			return account
+		}
+	}
+
+	return account
 }
 
 // DeleteInstance 删除实例
@@ -170,6 +267,12 @@ func (m *Manager) DeleteInstance(id string) error {
 	}
 
 	inst.markDeleted()
+
+	if m.resourceMgr != nil {
+		if err := m.resourceMgr.DeleteInstance(id); err != nil && !errors.Is(err, resource.ErrInstanceNotFound) {
+			return err
+		}
+	}
 
 	m.mu.Lock()
 	delete(m.instances, id)
@@ -384,7 +487,6 @@ func reconnectFailureReason(err error) string {
 
 func (m *Manager) emitReconnectEvent(level, action, message string, inst *Instance, reason string, fields map[string]any) {
 	event := logx.NewReconnectEvent(level, action, message, inst.ID, inst.Account.ID, reason)
-	event.PlayerID = inst.Account.PlayerID
 	event.Fields = fields
 	logx.Emit(event)
 }
@@ -403,6 +505,9 @@ func (m *Manager) UpdateConfig(config ClusterConfig) {
 
 // AddAccount 添加账号到集群配置
 func (m *Manager) AddAccount(account AccountEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// 检查ID是否已存在
 	for _, acc := range m.config.Accounts {
 		if acc.ID == account.ID {
@@ -412,11 +517,11 @@ func (m *Manager) AddAccount(account AccountEntry) error {
 
 	// 添加账号
 	m.config.Accounts = append(m.config.Accounts, account)
-	logx.Infof("账号已添加到集群配置: %s (%s)", account.ID, account.PlayerID)
+	logx.Infof("账号已添加到集群配置: %s", account.ID)
 
 	// 如果配置了自动保存，保存配置
 	if m.configPath != "" {
-		if err := SaveClusterConfig(m.configPath, m.config); err != nil {
+		if err := m.saveConfigLocked(); err != nil {
 			logx.Warnf("保存集群配置失败: %v", err)
 			// 不返回错误，继续操作
 		}
@@ -427,6 +532,15 @@ func (m *Manager) AddAccount(account AccountEntry) error {
 
 // RemoveAccount 从集群配置中移除账号
 func (m *Manager) RemoveAccount(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.resourceMgr != nil {
+		if err := m.resourceMgr.DeleteAccount(id); err != nil && !errors.Is(err, resource.ErrAccountNotFound) {
+			return err
+		}
+	}
+
 	found := false
 	for i, acc := range m.config.Accounts {
 		if acc.ID == id {
@@ -445,7 +559,7 @@ func (m *Manager) RemoveAccount(id string) error {
 
 	// 如果配置了自动保存，保存配置
 	if m.configPath != "" {
-		if err := SaveClusterConfig(m.configPath, m.config); err != nil {
+		if err := m.saveConfigLocked(); err != nil {
 			logx.Warnf("保存集群配置失败: %v", err)
 		}
 	}
@@ -459,10 +573,50 @@ func (m *Manager) SaveConfig() error {
 		return fmt.Errorf("no config path set")
 	}
 
-	return SaveClusterConfig(m.configPath, m.config)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.saveConfigLocked()
 }
 
 // SetConfigPath 设置配置文件路径
 func (m *Manager) SetConfigPath(path string) {
 	m.configPath = path
+}
+
+func (m *Manager) saveConfigLocked() error {
+	cfg, err := appconfig.Load(m.configPath)
+	if err != nil {
+		return fmt.Errorf("load app config: %w", err)
+	}
+
+	cfg.Cluster = appconfig.ClusterConfig{
+		Global: appconfig.GlobalConfig{
+			MaxInstances: m.config.Global.MaxInstances,
+			ReconnectPolicy: appconfig.ReconnectPolicy{
+				Enabled:    m.config.Global.ReconnectPolicy.Enabled,
+				MaxRetries: m.config.Global.ReconnectPolicy.MaxRetries,
+				BaseDelay:  m.config.Global.ReconnectPolicy.BaseDelay,
+				MaxDelay:   m.config.Global.ReconnectPolicy.MaxDelay,
+				Multiplier: m.config.Global.ReconnectPolicy.Multiplier,
+			},
+		},
+		Accounts: convertAccountsToConfig(m.config.Accounts),
+	}
+
+	if err := appconfig.Save(m.configPath, *cfg); err != nil {
+		return fmt.Errorf("save app config: %w", err)
+	}
+	return nil
+}
+
+func convertAccountsToConfig(accounts []AccountEntry) []appconfig.AccountEntry {
+	result := make([]appconfig.AccountEntry, len(accounts))
+	for i, account := range accounts {
+		result[i] = appconfig.AccountEntry{
+			ID:            account.ID,
+			ServerAddress: account.ServerAddress,
+			Enabled:       account.Enabled,
+		}
+	}
+	return result
 }

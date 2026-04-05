@@ -67,6 +67,11 @@ type MinecraftProfileData struct {
 	Name string
 }
 
+type AccountProfile struct {
+	ProfileID   string
+	ProfileName string
+}
+
 type TokenCache struct {
 	AccountID     string              `json:"account_id"`
 	UpdatedAt     time.Time           `json:"updated_at"`

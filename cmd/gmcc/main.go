@@ -5,17 +5,31 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	authsession "gmcc/internal/auth/session"
+	authvault "gmcc/internal/auth/vault"
 	"gmcc/internal/cluster"
 	"gmcc/internal/config"
 	"gmcc/internal/logx"
+	"gmcc/internal/resource"
+	"gmcc/internal/state"
 	"gmcc/internal/web"
 	"gmcc/internal/webtypes"
 )
 
 var Version = "dev"
+
+type runtimeDeps struct {
+	VaultRepository    *authvault.Repository
+	AccountRepository  *state.AccountRepository
+	InstanceRepository *state.InstanceRepository
+	AuthManager        *authsession.AuthManager
+	ResourceManager    *resource.Manager
+	ClusterManager     *cluster.Manager
+	WebConfig          webtypes.WebConfig
+}
 
 func main() {
 	configPath := "config.yaml"
@@ -40,36 +54,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 创建集群管理器
-	clusterCfg := cluster.ClusterConfig{
-		Global: cluster.GlobalConfig{
-			MaxInstances: cfg.Cluster.Global.MaxInstances,
-			ReconnectPolicy: cluster.ReconnectPolicy{
-				Enabled:    cfg.Cluster.Global.ReconnectPolicy.Enabled,
-				MaxRetries: cfg.Cluster.Global.ReconnectPolicy.MaxRetries,
-				BaseDelay:  cfg.Cluster.Global.ReconnectPolicy.BaseDelay,
-				MaxDelay:   cfg.Cluster.Global.ReconnectPolicy.MaxDelay,
-				Multiplier: cfg.Cluster.Global.ReconnectPolicy.Multiplier,
-			},
-		},
-		Accounts: convertAccounts(cfg.Cluster.Accounts),
+	runtime, err := buildRuntime(configPath, cfg)
+	if err != nil {
+		logx.Errorf("运行时初始化失败: %v", err)
+		os.Exit(1)
 	}
 
-	authManager := authsession.NewAuthManager(
-		authsession.NewTokenStore(".session"),
-		authsession.NewLiveProviderSet(),
-	)
-
-	clusterManager := cluster.NewManager(clusterCfg, authManager, configPath)
-	if err := clusterManager.Start(); err != nil {
+	if err := runtime.ClusterManager.Start(); err != nil {
 		logx.Errorf("集群管理器启动失败: %v", err)
 		os.Exit(1)
 	}
 
-	// 创建Web配置
-	webCfg := convertToWebConfig(&cfg.Web)
-
-	server, err := web.NewServer(webCfg, configPath, clusterManager)
+	server, err := web.NewServer(runtime.WebConfig, configPath, runtime.ClusterManager, runtime.ResourceManager, runtime.AuthManager)
 	if err != nil {
 		logx.Errorf("Web服务器创建失败: %v", err)
 		os.Exit(1)
@@ -89,9 +85,85 @@ func main() {
 	<-ctx.Done()
 	logx.Infof("正在关闭...")
 
-	if err := clusterManager.Stop(); err != nil {
+	if err := runtime.ClusterManager.Stop(); err != nil {
 		logx.Errorf("集群管理器停止错误: %v", err)
 	}
+}
+
+func buildRuntime(configPath string, cfg *config.Config) (*runtimeDeps, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+
+	vaultKey := os.Getenv(cfg.Auth.Vault.KeyEnv)
+	if vaultKey == "" {
+		return nil, fmt.Errorf("missing vault key env %s", cfg.Auth.Vault.KeyEnv)
+	}
+
+	baseDir := runtimeBaseDir(configPath)
+	vaultRepo, err := authvault.NewRepository(authvault.Config{
+		Dir:       resolveRuntimePath(baseDir, cfg.Auth.Vault.Path),
+		MasterKey: []byte(vaultKey),
+		ScryptN:   cfg.Auth.Vault.ScryptN,
+		ScryptR:   cfg.Auth.Vault.ScryptR,
+		ScryptP:   cfg.Auth.Vault.ScryptP,
+		SaltLen:   cfg.Auth.Vault.SaltLen,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create auth vault repository: %w", err)
+	}
+
+	accountRepo := state.NewAccountRepository(filepath.Join(baseDir, ".state", "accounts.yaml"))
+	instanceRepo := state.NewInstanceRepository(filepath.Join(baseDir, ".state", "instances.yaml"))
+	authManager := authsession.NewAuthManager(vaultRepo, authsession.NewLiveProviderSet())
+	resourceManager := resource.NewManager(accountRepo, instanceRepo, authManager)
+
+	if restored, err := resourceManager.RestoreResources(); err != nil {
+		return nil, fmt.Errorf("restore resource metadata: %w", err)
+	} else {
+		logx.Infof("资源元数据已加载: restored=%d skipped=%d", restored.RestoredCount, restored.SkippedCount)
+	}
+
+	clusterCfg := cluster.ClusterConfig{
+		Global: cluster.GlobalConfig{
+			MaxInstances: cfg.Cluster.Global.MaxInstances,
+			ReconnectPolicy: cluster.ReconnectPolicy{
+				Enabled:    cfg.Cluster.Global.ReconnectPolicy.Enabled,
+				MaxRetries: cfg.Cluster.Global.ReconnectPolicy.MaxRetries,
+				BaseDelay:  cfg.Cluster.Global.ReconnectPolicy.BaseDelay,
+				MaxDelay:   cfg.Cluster.Global.ReconnectPolicy.MaxDelay,
+				Multiplier: cfg.Cluster.Global.ReconnectPolicy.Multiplier,
+			},
+		},
+		Accounts: convertAccounts(cfg.Cluster.Accounts),
+	}
+
+	clusterManager := cluster.NewManager(clusterCfg, authManager, configPath)
+	clusterManager.SetResourceManager(resourceManager)
+
+	return &runtimeDeps{
+		VaultRepository:    vaultRepo,
+		AccountRepository:  accountRepo,
+		InstanceRepository: instanceRepo,
+		AuthManager:        authManager,
+		ResourceManager:    resourceManager,
+		ClusterManager:     clusterManager,
+		WebConfig:          convertToWebConfig(&cfg.Web),
+	}, nil
+}
+
+func runtimeBaseDir(configPath string) string {
+	if configPath == "" {
+		return "."
+	}
+	return filepath.Dir(configPath)
+}
+
+func resolveRuntimePath(baseDir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(baseDir, path)
 }
 
 // convertAccounts 将 config.AccountEntry 转换为 cluster.AccountEntry
@@ -99,11 +171,9 @@ func convertAccounts(accounts []config.AccountEntry) []cluster.AccountEntry {
 	result := make([]cluster.AccountEntry, len(accounts))
 	for i, acc := range accounts {
 		result[i] = cluster.AccountEntry{
-			ID:              acc.ID,
-			PlayerID:        acc.PlayerID,
-			UseOfficialAuth: acc.UseOfficialAuth,
-			ServerAddress:   acc.ServerAddress,
-			Enabled:         acc.Enabled,
+			ID:            acc.ID,
+			ServerAddress: acc.ServerAddress,
+			Enabled:       acc.Enabled,
 		}
 	}
 	return result
@@ -111,30 +181,10 @@ func convertAccounts(accounts []config.AccountEntry) []cluster.AccountEntry {
 
 // convertToWebConfig 将 config.WebConfig 转换为 webtypes.WebConfig
 func convertToWebConfig(webCfg *config.WebConfig) webtypes.WebConfig {
-	passwords := make([]webtypes.PasswordEntry, len(webCfg.Auth.Passwords))
-	for i, p := range webCfg.Auth.Passwords {
-		passwords[i] = webtypes.PasswordEntry{
-			ID:        p.ID,
-			Hash:      p.Hash,
-			Enabled:   p.Enabled,
-			CreatedAt: p.CreatedAt,
-			Note:      p.Note,
-		}
-	}
-
 	return webtypes.WebConfig{
 		Bind: webCfg.Bind,
 		Auth: webtypes.AuthConfig{
-			TokenExpiry:           webCfg.Auth.TokenExpiry,
 			AuditLogRetentionDays: webCfg.Auth.AuditLogRetentionDays,
-			Passwords:             passwords,
-		},
-		TokenVault: webtypes.TokenVaultConfig{
-			StoragePath: webCfg.TokenVault.StoragePath,
-			ScryptN:     webCfg.TokenVault.ScryptN,
-			ScryptR:     webCfg.TokenVault.ScryptR,
-			ScryptP:     webCfg.TokenVault.ScryptP,
-			SaltLen:     webCfg.TokenVault.SaltLen,
 		},
 		CORS: webtypes.CORSConfig{
 			Enabled: webCfg.CORS.Enabled,

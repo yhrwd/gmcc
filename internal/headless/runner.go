@@ -28,7 +28,7 @@ func New(cfg *config.Config) *Runner {
 // Run 运行无界面模式
 func (r *Runner) Run(ctx context.Context) error {
 	logx.Infof("gmcc 启动 (无界面模式)")
-	logx.Infof("玩家: %s", r.cfg.Account.PlayerID)
+	logx.Infof("账号: %s", r.cfg.ClusterRuntime.AccountID)
 	logx.Infof("服务器: %s", r.cfg.Server.Address)
 	logx.Infof("正在连接...")
 

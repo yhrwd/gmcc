@@ -11,13 +11,177 @@ import (
 
 	authsession "gmcc/internal/auth/session"
 	"gmcc/internal/logx"
+	"gmcc/internal/resource"
+	"gmcc/internal/state"
 )
+
+type fakeResourceManager struct {
+	accountInput      resource.CreateAccountInput
+	accountResult     state.AccountMeta
+	accountErr        error
+	accountCalled     bool
+	createInput       resource.CreateInstanceInput
+	createResult      state.InstanceMeta
+	createErr         error
+	createCalled      bool
+	deleteAccountID   string
+	deleteAccountErr  error
+	deleteInstanceID  string
+	deleteInstanceErr error
+	restoreResult     resource.RestoreResourcesResult
+	restoreErr        error
+	restoreCalled     bool
+}
+
+func (f *fakeResourceManager) CreateAccount(in resource.CreateAccountInput) (state.AccountMeta, error) {
+	f.accountCalled = true
+	f.accountInput = in
+	if f.accountErr != nil {
+		return state.AccountMeta{}, f.accountErr
+	}
+	if f.accountResult.AccountID == "" {
+		f.accountResult = state.AccountMeta{AccountID: in.AccountID, Enabled: in.Enabled}
+	}
+	return f.accountResult, nil
+}
+
+func (f *fakeResourceManager) CreateInstance(in resource.CreateInstanceInput) (state.InstanceMeta, error) {
+	f.createCalled = true
+	f.createInput = in
+	if f.createErr != nil {
+		return state.InstanceMeta{}, f.createErr
+	}
+	if f.createResult.InstanceID == "" {
+		f.createResult = state.InstanceMeta{
+			InstanceID:    in.InstanceID,
+			AccountID:     in.AccountID,
+			ServerAddress: in.ServerAddress,
+			Enabled:       in.Enabled,
+		}
+	}
+	return f.createResult, nil
+}
+
+func (f *fakeResourceManager) DeleteAccount(accountID string) error {
+	f.deleteAccountID = accountID
+	return f.deleteAccountErr
+}
+
+func (f *fakeResourceManager) DeleteInstance(instanceID string) error {
+	f.deleteInstanceID = instanceID
+	return f.deleteInstanceErr
+}
+
+func (f *fakeResourceManager) RestoreResources() (resource.RestoreResourcesResult, error) {
+	f.restoreCalled = true
+	if f.restoreErr != nil {
+		return resource.RestoreResourcesResult{}, f.restoreErr
+	}
+	return f.restoreResult, nil
+}
+
+func TestManager_CreateInstanceUsesResourceManager(t *testing.T) {
+	initTestLogger(t)
+
+	rm := &fakeResourceManager{createResult: state.InstanceMeta{
+		InstanceID:    "bot-1",
+		AccountID:     "acc-main",
+		ServerAddress: "mc.example.com",
+		Enabled:       true,
+	}}
+	m := NewManager(DefaultClusterConfig(), nil)
+	m.SetResourceManager(rm)
+
+	err := m.CreateInstance("bot-1", AccountEntry{ID: "acc-main", ServerAddress: "ignored.example.com", Enabled: false})
+	if err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	if !rm.createCalled {
+		t.Fatalf("expected resource manager create to be called")
+	}
+	if rm.createInput.InstanceID != "bot-1" || rm.createInput.AccountID != "acc-main" {
+		t.Fatalf("unexpected create input: %+v", rm.createInput)
+	}
+	if rm.createInput.ServerAddress != "ignored.example.com" {
+		t.Fatalf("expected create input server address, got %q", rm.createInput.ServerAddress)
+	}
+
+	inst, err := m.GetInstance("bot-1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	if inst.Account.ID != "acc-main" {
+		t.Fatalf("expected runtime account id acc-main, got %q", inst.Account.ID)
+	}
+	if inst.Account.ServerAddress != "mc.example.com" {
+		t.Fatalf("expected runtime server address from metadata, got %q", inst.Account.ServerAddress)
+	}
+	if !inst.Account.Enabled {
+		t.Fatalf("expected runtime account enabled from metadata")
+	}
+}
+
+func TestManager_StartRestoresValidatedInstancesWithoutAutoStart(t *testing.T) {
+	initTestLogger(t)
+
+	cfg := DefaultClusterConfig()
+	cfg.Accounts = []AccountEntry{{ID: "acc-main", ServerAddress: "mc.example.com", Enabled: true}}
+	rm := &fakeResourceManager{restoreResult: resource.RestoreResourcesResult{
+		RestoredInstances: []state.InstanceMeta{{
+			InstanceID:    "bot-restore",
+			AccountID:     "acc-main",
+			ServerAddress: "mc.example.com",
+			Enabled:       true,
+		}},
+		RestoredCount: 1,
+	}}
+	m := NewManager(cfg, nil)
+	m.SetResourceManager(rm)
+
+	if err := m.Start(); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	if !rm.restoreCalled {
+		t.Fatalf("expected restore resources to be called")
+	}
+
+	inst, err := m.GetInstance("bot-restore")
+	if err != nil {
+		t.Fatalf("get restored instance: %v", err)
+	}
+	if got := inst.GetStatus(); got != StatusPending {
+		t.Fatalf("expected restored instance to remain pending, got %s", got)
+	}
+	if inst.Account.ID != "acc-main" {
+		t.Fatalf("expected restored runtime account id acc-main, got %q", inst.Account.ID)
+	}
+	if got := len(m.ListInstances()); got != 1 {
+		t.Fatalf("expected one restored instance, got %d", got)
+	}
+}
+
+func TestManager_GetInstanceInfoIncludesAccountID(t *testing.T) {
+	initTestLogger(t)
+
+	m := NewManager(DefaultClusterConfig(), nil)
+	if err := m.CreateInstance("bot-1", AccountEntry{ID: "acc-main", ServerAddress: "mc.example.com", Enabled: true}); err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+
+	info, err := m.GetInstanceInfo("bot-1")
+	if err != nil {
+		t.Fatalf("get instance info: %v", err)
+	}
+	if info.AccountID != "acc-main" {
+		t.Fatalf("want account id acc-main, got %q", info.AccountID)
+	}
+}
 
 func TestManager_StartDoesNotAutoLaunchEnabledAccounts(t *testing.T) {
 	initTestLogger(t)
 
 	cfg := DefaultClusterConfig()
-	cfg.Accounts = []AccountEntry{{ID: "a1", PlayerID: "p1", Enabled: true}}
+	cfg.Accounts = []AccountEntry{{ID: "a1", Enabled: true}}
 	m := NewManager(cfg, nil)
 	if err := m.Start(); err != nil {
 		t.Fatalf("start manager: %v", err)
@@ -33,7 +197,7 @@ func TestManager_DeleteTimeoutWhenRunnerBlocks(t *testing.T) {
 	cfg := DefaultClusterConfig()
 	cfg.Global.ReconnectPolicy.Enabled = false
 	m := NewManager(cfg, nil)
-	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	m.deleteTimeout = 20 * time.Millisecond
@@ -83,7 +247,7 @@ func TestManager_LocalSimulationReconnectPolicy(t *testing.T) {
 			cfg.Global.ReconnectPolicy.MaxRetries = 1
 
 			m := NewManager(cfg, nil)
-			if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+			if err := m.CreateInstance("a1", AccountEntry{ID: "a1"}); err != nil {
 				t.Fatalf("create: %v", err)
 			}
 
@@ -141,7 +305,7 @@ func TestManager_AuthSessionErrorsDoNotReconnect(t *testing.T) {
 	cfg := DefaultClusterConfig()
 	cfg.Global.ReconnectPolicy.Enabled = true
 	m := NewManager(cfg, nil)
-	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	inst, err := m.GetInstance("a1")
@@ -178,7 +342,7 @@ func TestManager_StopCancelsPendingReconnect(t *testing.T) {
 	cfg.Global.ReconnectPolicy.MaxRetries = 1
 
 	m := NewManager(cfg, nil)
-	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	inst, err := m.GetInstance("a1")
@@ -213,7 +377,7 @@ func TestManager_DeleteCancelsPendingReconnect(t *testing.T) {
 	cfg.Global.ReconnectPolicy.MaxRetries = 1
 
 	m := NewManager(cfg, nil)
-	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	inst, err := m.GetInstance("a1")
@@ -257,7 +421,7 @@ func TestManager_ReconnectPolicyEmitsStructuredEvent(t *testing.T) {
 	cfg.Global.ReconnectPolicy.MaxRetries = 1
 
 	m := NewManager(cfg, nil)
-	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -347,7 +511,7 @@ func TestManager_InstanceLifecycleEmitsStructuredEvents(t *testing.T) {
 	cfg.Global.ReconnectPolicy.Enabled = false
 
 	m := NewManager(cfg, nil)
-	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1", ServerAddress: "example.org:25565"}); err != nil {
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", ServerAddress: "example.org:25565"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
