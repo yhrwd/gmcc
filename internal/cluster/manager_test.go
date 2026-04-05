@@ -167,6 +167,79 @@ func TestManager_AuthSessionErrorsDoNotReconnect(t *testing.T) {
 	}
 }
 
+func TestManager_StopCancelsPendingReconnect(t *testing.T) {
+	initTestLogger(t)
+
+	cfg := DefaultClusterConfig()
+	cfg.Global.ReconnectPolicy.Enabled = true
+	cfg.Global.ReconnectPolicy.BaseDelay = 200 * time.Millisecond
+	cfg.Global.ReconnectPolicy.MaxDelay = 200 * time.Millisecond
+	cfg.Global.ReconnectPolicy.Multiplier = 1
+	cfg.Global.ReconnectPolicy.MaxRetries = 1
+
+	m := NewManager(cfg, nil)
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	inst, err := m.GetInstance("a1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	factory := newScriptedRunnerFactory(runnerOutcome{err: ErrRunnerNetworkDisconnect, ready: true, runDelay: 10 * time.Millisecond}, runnerOutcome{})
+	inst.runnerFactory = factory.Build
+
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if err := m.StopInstance("a1"); err != nil {
+		t.Fatalf("stop instance: %v", err)
+	}
+	time.Sleep(260 * time.Millisecond)
+
+	if got := factory.BuildCount(); got != 1 {
+		t.Fatalf("expected no restart after stop, builds=%d", got)
+	}
+}
+
+func TestManager_DeleteCancelsPendingReconnect(t *testing.T) {
+	initTestLogger(t)
+
+	cfg := DefaultClusterConfig()
+	cfg.Global.ReconnectPolicy.Enabled = true
+	cfg.Global.ReconnectPolicy.BaseDelay = 200 * time.Millisecond
+	cfg.Global.ReconnectPolicy.MaxDelay = 200 * time.Millisecond
+	cfg.Global.ReconnectPolicy.Multiplier = 1
+	cfg.Global.ReconnectPolicy.MaxRetries = 1
+
+	m := NewManager(cfg, nil)
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	inst, err := m.GetInstance("a1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	factory := newScriptedRunnerFactory(runnerOutcome{err: ErrRunnerNetworkDisconnect, ready: true, runDelay: 10 * time.Millisecond}, runnerOutcome{})
+	inst.runnerFactory = factory.Build
+
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if err := m.DeleteInstance("a1"); err != nil {
+		t.Fatalf("delete instance: %v", err)
+	}
+	time.Sleep(260 * time.Millisecond)
+
+	if got := factory.BuildCount(); got != 1 {
+		t.Fatalf("expected no restart after delete, builds=%d", got)
+	}
+	if m.InstanceExists("a1") {
+		t.Fatalf("instance should remain deleted")
+	}
+}
+
 func TestManager_ReconnectPolicyEmitsStructuredEvent(t *testing.T) {
 	logDir := t.TempDir()
 	if err := logx.Init(logDir, true, 1024, false); err != nil {

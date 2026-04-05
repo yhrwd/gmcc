@@ -114,13 +114,7 @@ func getMicrosoftToken() (*TokenResponse, error) {
 		return nil, err
 	}
 
-	logx.Infof("请在浏览器打开下面的链接并输入代码完成登录")
-	if devResp.VerificationURIComplete != "" {
-		logx.Infof("自动链接: %s", devResp.VerificationURIComplete)
-	} else {
-		logx.Infof("链接: %s", devResp.VerificationURI)
-		logx.Infof("代码: %s", devResp.UserCode)
-	}
+	logx.Summaryf("info", "需要微软设备码登录，请在控制面或授权流程中完成登录")
 
 	return pollDeviceCodeToken(MICROSOFT_CLIENT_ID, devResp)
 }

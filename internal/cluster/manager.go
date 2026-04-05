@@ -336,7 +336,13 @@ func (m *Manager) handleReconnect(inst *Instance) {
 		select {
 		case <-m.ctx.Done():
 			return
+		case <-inst.reconnectStopCh:
+			return
 		case <-time.After(delay):
+		}
+
+		if inst.shouldAbortReconnect() {
+			return
 		}
 
 		// 尝试启动（仅自动重连触发）
@@ -349,7 +355,7 @@ func (m *Manager) handleReconnect(inst *Instance) {
 			inst.resetReconnectAttempts()
 			return
 		} else {
-			m.emitReconnectEvent("warn", "failed", "instance reconnect attempt failed", inst, err.Error(), map[string]any{
+			m.emitReconnectEvent("warn", "failed", "instance reconnect attempt failed", inst, reconnectFailureReason(err), map[string]any{
 				"attempt":     attempt + 1,
 				"max_retries": policy.MaxRetries,
 			})
@@ -363,6 +369,17 @@ func (m *Manager) handleReconnect(inst *Instance) {
 		"max_retries": policy.MaxRetries,
 	})
 	logx.Errorf("实例 %s 重连次数已耗尽", inst.ID)
+}
+
+func reconnectFailureReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	category := classifyExitCategory(err)
+	if category != ExitCategoryUnknown {
+		return string(category)
+	}
+	return "start_failed"
 }
 
 func (m *Manager) emitReconnectEvent(level, action, message string, inst *Instance, reason string, fields map[string]any) {

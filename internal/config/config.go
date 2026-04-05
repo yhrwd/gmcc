@@ -137,10 +137,10 @@ func Default() Config {
 				MaxInstances: 10,
 				ReconnectPolicy: ReconnectPolicy{
 					Enabled:    true,
-					MaxRetries: 5,
-					BaseDelay:  5 * time.Second,
-					MaxDelay:   300 * time.Second,
-					Multiplier: 2.0,
+					MaxRetries: 0,
+					BaseDelay:  2 * time.Second,
+					MaxDelay:   2 * time.Minute,
+					Multiplier: 1.8,
 				},
 			},
 			Accounts: []AccountEntry{},
@@ -333,13 +333,13 @@ func (c *Config) fillDefaults() {
 		c.Cluster.Global.MaxInstances = 10
 	}
 	if c.Cluster.Global.ReconnectPolicy.BaseDelay == 0 {
-		c.Cluster.Global.ReconnectPolicy.BaseDelay = 5 * time.Second
+		c.Cluster.Global.ReconnectPolicy.BaseDelay = 2 * time.Second
 	}
 	if c.Cluster.Global.ReconnectPolicy.MaxDelay == 0 {
-		c.Cluster.Global.ReconnectPolicy.MaxDelay = 300 * time.Second
+		c.Cluster.Global.ReconnectPolicy.MaxDelay = 2 * time.Minute
 	}
-	if c.Cluster.Global.ReconnectPolicy.MaxRetries == 0 {
-		c.Cluster.Global.ReconnectPolicy.MaxRetries = 5
+	if c.Cluster.Global.ReconnectPolicy.Multiplier == 0 {
+		c.Cluster.Global.ReconnectPolicy.Multiplier = 1.8
 	}
 
 	// Web默认值

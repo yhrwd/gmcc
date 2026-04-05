@@ -436,6 +436,41 @@ func TestAuthManager_ClearRemovesCacheAndFlowState(t *testing.T) {
 	}
 }
 
+func TestAuthManager_GetSessionSingleFlightsValidMicrosoftAccessPath(t *testing.T) {
+	provider := newFakeProvider()
+	provider.refreshResult = fakeRefreshResult{
+		session: AuthSession{
+			AccountID:            "acc-main",
+			MinecraftAccessToken: "mc-single-flight",
+			ProfileID:            "uuid",
+			ProfileName:          "Steve",
+		},
+	}
+	store := newFakeTokenStore()
+	store.caches["acc-main"] = &TokenCache{
+		AccountID: "acc-main",
+		Microsoft: MicrosoftTokenCache{
+			AccessToken: "ms-access",
+			ExpiresAt:   time.Now().Add(10 * time.Minute),
+		},
+	}
+	mgr := NewAuthManager(store, provider)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = mgr.GetSession(context.Background(), "acc-main")
+		}()
+	}
+	wg.Wait()
+
+	if provider.getXSTSCalls() != 1 {
+		t.Fatalf("expected 1 XSTS call, got %d", provider.getXSTSCalls())
+	}
+}
+
 func newFakeTokenStore() *fakeTokenStore {
 	return &fakeTokenStore{caches: map[string]*TokenCache{}}
 }
@@ -478,6 +513,7 @@ func (f *fakeTokenStore) Delete(accountID string) error {
 type fakeProvider struct {
 	mu              sync.Mutex
 	refreshCalls    int
+	xstsCalls       int
 	refreshResult   fakeRefreshResult
 	refreshErr      error
 	deviceLoginInfo DeviceLoginInfo
@@ -532,6 +568,9 @@ func (f *fakeProvider) RefreshMicrosoft(_ context.Context, _ string) (MicrosoftT
 }
 
 func (f *fakeProvider) GetXSTSFromMicrosoft(_ context.Context, _ string) (XSTSClaims, error) {
+	f.mu.Lock()
+	f.xstsCalls++
+	f.mu.Unlock()
 	return XSTSClaims{}, nil
 }
 
@@ -562,6 +601,12 @@ func (f *fakeProvider) getPollCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.pollCalls
+}
+
+func (f *fakeProvider) getXSTSCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.xstsCalls
 }
 
 func waitForDeviceLoginFinalState(t *testing.T, mgr *AuthManager, accountID string, timeout time.Duration) (DeviceLoginStatus, *AuthSession, error) {

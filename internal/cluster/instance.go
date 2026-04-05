@@ -54,16 +54,17 @@ type Instance struct {
 	Account AccountEntry
 
 	// 状态
-	mu             sync.RWMutex
-	status         InstanceStatus
-	startTime      time.Time
-	lastActive     time.Time
-	reconnectCount int
-	errorMsg       string
-	version        uint64
-	runVersion     uint64
-	deleted        bool
-	exitCh         chan struct{}
+	mu              sync.RWMutex
+	status          InstanceStatus
+	startTime       time.Time
+	lastActive      time.Time
+	reconnectCount  int
+	errorMsg        string
+	version         uint64
+	runVersion      uint64
+	deleted         bool
+	reconnectStopCh chan struct{}
+	exitCh          chan struct{}
 
 	// 运行时
 	runner  runner
@@ -81,13 +82,14 @@ type Instance struct {
 // newInstance 创建新实例（内部使用）
 func newInstance(id string, account AccountEntry, manager *Manager) *Instance {
 	return &Instance{
-		ID:            id,
-		Account:       account,
-		status:        StatusPending,
-		errChan:       make(chan error, 1),
-		exitCh:        make(chan struct{}, 1),
-		manager:       manager,
-		runnerFactory: defaultRunnerFactory,
+		ID:              id,
+		Account:         account,
+		status:          StatusPending,
+		errChan:         make(chan error, 1),
+		reconnectStopCh: make(chan struct{}),
+		exitCh:          make(chan struct{}, 1),
+		manager:         manager,
+		runnerFactory:   defaultRunnerFactory,
 	}
 }
 
@@ -100,6 +102,9 @@ func (i *Instance) Start() error {
 func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if i.deleted {
+		return fmt.Errorf("instance %s already deleted", i.ID)
+	}
 
 	switch i.status {
 	case StatusStarting, StatusRunning:
@@ -113,6 +118,7 @@ func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 	i.errorMsg = ""
 	if trigger != StartTriggerAutoReconnect {
 		i.resetReconnectAttemptsLocked()
+		i.resetReconnectStopLocked()
 	}
 	i.version++
 	i.runVersion = i.version
@@ -216,6 +222,7 @@ func (i *Instance) startRunnerLocked(trigger StartTrigger, runVersion uint64) er
 func (i *Instance) Stop() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	i.stopReconnectLocked()
 
 	if i.status == StatusStopped {
 		return nil // 已经停止
@@ -400,7 +407,7 @@ func (i *Instance) applyExitEvent(runVersion uint64, category ExitCategory, err 
 		return true
 	}
 	if next == StatusError {
-		i.emitLifecycleEvent("error", "error", "instance exited with error", reason, map[string]any{
+		i.emitLifecycleEvent("error", "error", "instance exited with error", string(category), map[string]any{
 			"status":        string(next),
 			"exit_category": string(category),
 		})
@@ -441,8 +448,40 @@ func (i *Instance) waitExit(ctx context.Context) error {
 
 func (i *Instance) markDeleted() {
 	i.mu.Lock()
+	i.stopReconnectLocked()
 	i.deleted = true
 	i.mu.Unlock()
+}
+
+func (i *Instance) shouldAbortReconnect() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	if i.deleted {
+		return true
+	}
+	select {
+	case <-i.reconnectStopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (i *Instance) stopReconnectLocked() {
+	select {
+	case <-i.reconnectStopCh:
+		return
+	default:
+		close(i.reconnectStopCh)
+	}
+}
+
+func (i *Instance) resetReconnectStopLocked() {
+	select {
+	case <-i.reconnectStopCh:
+		i.reconnectStopCh = make(chan struct{})
+	default:
+	}
 }
 
 func (i *Instance) markError(msg string) {

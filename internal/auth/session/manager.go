@@ -66,7 +66,7 @@ func (m *AuthManager) GetSession(ctx context.Context, accountID string) (AuthSes
 		return cache.ToAuthSession(AuthSourceCache), nil
 	}
 	if cache.HasValidMicrosoftAccess(now) {
-		return m.completeSessionFromMicrosoft(ctx, strings.TrimSpace(accountID), cache.Microsoft, AuthSourceRefresh)
+		return m.singleFlightMicrosoftAccess(ctx, strings.TrimSpace(accountID), cache)
 	}
 	if !cache.HasMicrosoftRefreshToken() {
 		return AuthSession{}, m.persistAuthFailure(accountID, cache, ErrDeviceLoginRequired)
@@ -112,6 +112,37 @@ func (m *AuthManager) Clear(accountID string) error {
 }
 
 func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
+	return m.singleFlightSession(ctx, accountID, func() (AuthSession, error) {
+		if latest, err := m.store.Load(accountID); err == nil {
+			now := time.Now().UTC()
+			if latest.HasValidMinecraftToken(now) {
+				session := latest.ToAuthSession(AuthSourceCache)
+				m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
+				return session, nil
+			}
+		}
+		return m.refreshSession(ctx, accountID, cache)
+	})
+}
+
+func (m *AuthManager) singleFlightMicrosoftAccess(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
+	return m.singleFlightSession(ctx, accountID, func() (AuthSession, error) {
+		if latest, err := m.store.Load(accountID); err == nil {
+			now := time.Now().UTC()
+			if latest.HasValidMinecraftToken(now) {
+				session := latest.ToAuthSession(AuthSourceCache)
+				m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
+				return session, nil
+			}
+			if latest.HasValidMicrosoftAccess(now) {
+				return m.completeSessionFromMicrosoft(ctx, accountID, latest.Microsoft, AuthSourceRefresh)
+			}
+		}
+		return m.completeSessionFromMicrosoft(ctx, accountID, cache.Microsoft, AuthSourceRefresh)
+	})
+}
+
+func (m *AuthManager) singleFlightSession(ctx context.Context, accountID string, run func() (AuthSession, error)) (AuthSession, error) {
 	m.mu.Lock()
 	if pending, ok := m.inflight[accountID]; ok {
 		m.mu.Unlock()
@@ -126,23 +157,7 @@ func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string,
 	pending := &inflightResult{done: make(chan struct{})}
 	m.inflight[accountID] = pending
 	m.mu.Unlock()
-
-	if latest, err := m.store.Load(accountID); err == nil {
-		now := time.Now().UTC()
-		if latest.HasValidMinecraftToken(now) {
-			session := latest.ToAuthSession(AuthSourceCache)
-			m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
-			m.mu.Lock()
-			pending.session = session
-			pending.err = nil
-			close(pending.done)
-			delete(m.inflight, accountID)
-			m.mu.Unlock()
-			return session, nil
-		}
-	}
-
-	session, err := m.refreshSession(ctx, accountID, cache)
+	session, err := run()
 
 	m.mu.Lock()
 	pending.session = session
