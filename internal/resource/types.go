@@ -74,6 +74,7 @@ type InstanceMetadataRepository interface {
 
 type AuthStatusReader interface {
 	GetAccountAuthStatus(accountID string) (session.AccountAuthStatus, error)
+	Clear(accountID string) error
 }
 
 func normalizeCreateInstanceInput(in CreateInstanceInput) CreateInstanceInput {

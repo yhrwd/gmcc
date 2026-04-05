@@ -1,282 +1,305 @@
-# gmcc 项目参考文档
+# gmcc 运行与集成参考
 
-## 项目概览
+本文档提供当前 gmcc API 服务的配置、目录结构、运行方式和数据模型参考，方便前端、后端和运维统一理解系统边界。
 
-**gmcc** 是一个基于 Go 开发的 Minecraft 客户端应用程序，提供无界面/自动化游戏能力。
+## 1. 项目定位
 
-- **模块名称**: `gmcc`
-- **Go 版本**: 1.25.1
-- **主要功能**: 连接到 Minecraft 服务器并执行自动化操作
+gmcc 当前形态是一个 API-first 的 Minecraft 集群运行时，核心职责包括：
 
----
+- 管理账号 metadata
+- 管理实例 metadata
+- 保存加密认证凭据
+- 启动、停止、重启实例
+- 提供可供前端消费的运行状态和审计日志
 
-## 目录结构
+## 2. 核心目录结构
 
-```
+```text
 gmcc/
-├── cmd/gmcc/              # 主程序入口点
-│   └── main.go           # 应用程序启动入口
-│
-├── internal/              # 私有应用代码（不可被外部导入）
-│   ├── auth/             # 认证模块（Microsoft/Minecraft）
-│   ├── config/           # 配置管理
-│   ├── constants/        # 应用常量定义
-│   ├── headless/         # 无界面运行器
-│   ├── logx/             # 日志工具
-│   ├── mcclient/         # Minecraft 客户端实现
-│   │   ├── crypto/       # 加密相关
-│   │   ├── packet/       # 数据包处理
-│   │   └── protocol/     # 协议实现
-│   └── session/          # 会话管理
-│
-├── pkg/                   # 公共库（可被外部导入）
-│   ├── binutil/          # 二进制数据工具
-│   │   ├── reader.go     # 二进制读取器
-│   │   ├── writer.go     # 二进制写入器
-│   │   └── types.go      # 类型定义（VarInt 等）
-│   └── httpx/            # HTTP 客户端工具
-│
-├── docs/                  # 文档
-├── config.yaml           # 默认配置文件
-└── go.mod                # Go 模块定义
+├── cmd/gmcc/                  # 程序入口
+├── internal/auth/             # 认证状态、provider、vault
+├── internal/cluster/          # 实例生命周期和集群编排
+├── internal/config/           # 统一配置定义与读写
+├── internal/resource/         # 账号/实例 metadata 编排层
+├── internal/state/            # metadata repository
+├── internal/web/              # HTTP API 层
+├── internal/webtypes/         # Web DTO
+├── docs/                      # 对接文档
+├── .authvault/                # 认证加密文件目录（运行时生成）
+├── .state/                    # metadata 状态目录（运行时生成）
+└── config.yaml                # 主配置文件
 ```
 
-### 关键目录说明
+## 3. 关键模块边界
 
-| 目录 | 用途 | 访问权限 |
-|------|------|----------|
-| `cmd/` | 包含可执行程序入口 | - |
-| `internal/` | 私有业务逻辑代码 | 仅限本项目 |
-| `pkg/` | 可复用的公共库 | 可外部导入 |
-| `docs/` | 项目文档 | - |
+### `internal/auth/session`
 
----
+负责账号认证状态管理，包括：
 
-## 配置文件参考
+- 账号认证状态判定
+- Microsoft 设备码登录流程
+- 登录成功后写入 vault
+- 查询账号 profile 和登录状态
 
-配置文件采用 YAML 格式，默认文件名为 `config.yaml`。
+关键状态：
 
-### 完整配置结构
+- `logged_in`
+- `not_logged_in`
+- `auth_invalid`
+
+### `internal/auth/vault`
+
+负责加密认证记录持久化：
+
+- 每账号一个 vault 文件
+- 原子写入
+- 按账号独立锁保护
+- 启动时依赖环境变量提供主密钥
+
+### `internal/state`
+
+负责 metadata 文件读写：
+
+- `AccountRepository` -> `.state/accounts.yaml`
+- `InstanceRepository` -> `.state/instances.yaml`
+
+特点：
+
+- YAML 持久化
+- 文件缺失时按空列表处理
+- 保存前校验唯一性
+- 原子覆盖写入
+
+### `internal/resource`
+
+负责跨 repository 的资源编排与引用校验：
+
+- 创建账号
+- 查询账号
+- 删除账号
+- 恢复资源
+- 校验实例创建前的账号状态
+
+它是“账号 metadata / 实例 metadata / auth status”之间的业务粘合层。
+
+### `internal/cluster`
+
+负责实例运行生命周期：
+
+- 创建实例
+- 启动/停止/重启/删除实例
+- 汇总集群状态
+- 自动重连
+- 维护实例运行态指标
+
+### `internal/web`
+
+负责 Gin API 路由，不提供静态前端页面。
+
+## 4. 配置参考
+
+默认配置结构如下：
 
 ```yaml
-account:
-    player_id: "your_player_id_here"        # 玩家 ID
-    use_official_auth: false                # 是否使用正版认证
+auth:
+  vault:
+    path: ".authvault"
+    key_env: "GMCC_AUTH_VAULT_KEY"
+    scrypt_n: 1048576
+    scrypt_r: 8
+    scrypt_p: 1
+    salt_len: 32
 
-server:
-    address: "127.0.0.1:25565"             # 服务器地址（主机:端口）
+cluster:
+  global:
+    max_instances: 10
+    reconnect_policy:
+      enabled: true
+      max_retries: 0
+      base_delay: 2s
+      max_delay: 2m
+      multiplier: 1.8
+  accounts: []
+
+web:
+  bind: "0.0.0.0:8080"
+  auth:
+    audit_log_retention_days: 30
+  cors:
+    enabled: true
+    origins:
+      - "http://localhost:5173"
+      - "http://localhost:3000"
 
 log:
-    log_dir: "logs"                         # 日志目录
-    max_size: 512                           # 单个日志文件最大大小（KB）
-    debug: false                            # 是否启用调试日志
-    enable_file: true                       # 是否启用文件日志
+  log_dir: "logs"
+  max_size: 512
+  debug: false
+  enable_file: true
 ```
 
-### 配置字段说明
+### 关键配置项说明
 
-#### account
+| 字段 | 说明 |
+|---|---|
+| `auth.vault.path` | 认证 vault 目录 |
+| `auth.vault.key_env` | 主密钥环境变量名 |
+| `cluster.global.max_instances` | 实例数上限，`0` 表示不限制 |
+| `cluster.global.reconnect_policy.*` | 自动重连参数 |
+| `web.bind` | HTTP API 监听地址 |
+| `web.cors.enabled` | 是否启用 CORS |
+| `web.cors.origins` | 允许的前端来源 |
+| `log.*` | 运行日志输出设置 |
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `player_id` | string | "your_player_id_here" | 玩家显示名称，最大 16 字符 |
-| `use_official_auth` | bool | false | 是否使用 Microsoft 正版认证 |
+## 5. 环境变量
 
-#### server
+| 变量名 | 说明 |
+|---|---|
+| `GMCC_CONFIG` | 自定义配置文件路径 |
+| `GMCC_AUTH_VAULT_KEY` | vault 主密钥 |
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `address` | string | "127.0.0.1:25565" | 目标服务器地址，格式为 `host:port` |
+如果 `auth.vault.key_env` 被改成别的名字，就需要提供对应的新环境变量。
 
-#### log
+## 6. 数据文件布局
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `log_dir` | string | "logs" | 日志文件存储目录，自动创建 |
-| `max_size` | int64 | 512 | 日志文件大小上限（KB） |
-| `debug` | bool | false | 启用后输出 DEBUG 级别日志 |
-| `enable_file` | bool | true | 是否将日志写入文件 |
+### `.state/accounts.yaml`
 
----
+保存账号非敏感元数据。
 
-## 环境变量
+示例：
 
-所有环境变量均以 `GMCC_` 为前缀。
-
-| 变量名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `GMCC_CONFIG` | string | "config.yaml" | 指定配置文件路径 |
-| `GMCC_DISABLE_AUTO_UPDATE` | bool | false | 设置为 "true" 禁用配置热更新 |
-
-### 使用示例
-
-```bash
-# 使用自定义配置文件
-set GMCC_CONFIG=/path/to/custom-config.yaml
-
-# 禁用配置热更新
-set GMCC_DISABLE_AUTO_UPDATE=true
+```yaml
+- account_id: acc-main
+  enabled: true
+  label: Main account
+  note: Primary production account
 ```
 
----
+### `.state/instances.yaml`
 
-## 构建参考
+保存实例非敏感元数据。
 
-### 基础构建
+示例：
+
+```yaml
+- instance_id: bot-1
+  account_id: acc-main
+  server_address: mc.example.com
+  enabled: true
+```
+
+### `.authvault/*.vault`
+
+保存账号认证记录的加密文件，不适合人工编辑。
+
+## 7. HTTP API 资源模型
+
+### AccountView
+
+```json
+{
+  "id": "acc-main",
+  "player_id": "player-uuid",
+  "enabled": true,
+  "label": "Main account",
+  "note": "Primary",
+  "auth_status": "logged_in",
+  "has_token": true
+}
+```
+
+### InstanceView
+
+```json
+{
+  "id": "bot-1",
+  "account_id": "acc-main",
+  "player_id": "player-uuid",
+  "server_address": "mc.example.com",
+  "status": "running",
+  "online_duration": "3m12s",
+  "last_seen": "2026-04-05T12:00:00Z",
+  "has_token": true,
+  "health": 20,
+  "food": 20,
+  "position": {
+    "x": 100.5,
+    "y": 65,
+    "z": -24.25
+  }
+}
+```
+
+### ClusterStatus
+
+```json
+{
+  "cluster_status": "partial",
+  "total_instances": 3,
+  "running_instances": 2,
+  "uptime": 60000000000
+}
+```
+
+说明：`uptime` 是 Go `time.Duration` 的 JSON 表现，当前为纳秒数值。
+
+## 8. 实例状态参考
+
+| 值 | 含义 |
+|---|---|
+| `pending` | 已创建，未启动 |
+| `starting` | 启动中 |
+| `running` | 运行中 |
+| `reconnecting` | 网络断开后自动重连中 |
+| `stopped` | 已停止 |
+| `error` | 运行异常 |
+
+## 9. 审计日志
+
+审计日志通过 `GET /api/logs/operations` 读取，磁盘上按天写入运行时基目录下的 `logs/audit/YYYY-MM-DD.jsonl`；运行时基目录默认取 `configPath` 所在目录。
+
+常见 `action`：
+
+- `account_create`
+- `account_delete`
+- `instance_create`
+- `instance_start`
+- `instance_stop`
+- `instance_restart`
+- `instance_delete`
+- `microsoft_auth_init`
+- `microsoft_auth_poll`
+
+## 10. 运行与验证命令
+
+### 构建
 
 ```bash
-# 构建主程序
 go build -o gmcc.exe ./cmd/gmcc
-
-# 构建带版本信息（推荐）
-go build -ldflags="-s -w -X main.Version=v1.0.0" -o gmcc.exe ./cmd/gmcc
-
-# 生产环境构建（去除符号表和调试信息）
-go build -ldflags="-s -w" -o gmcc.exe ./cmd/gmcc
 ```
 
-### 交叉编译
-
-| 目标平台 | 命令 |
-|----------|------|
-| Linux (amd64) | `GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o gmcc-linux ./cmd/gmcc` |
-| Linux (arm64) | `GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o gmcc-linux-arm64 ./cmd/gmcc` |
-| Windows (amd64) | `GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o gmcc.exe ./cmd/gmcc` |
-| Windows (arm64) | `GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o gmcc-arm64.exe ./cmd/gmcc` |
-| macOS (amd64) | `GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o gmcc-darwin ./cmd/gmcc` |
-| macOS (arm64) | `GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o gmcc-darwin-arm64 ./cmd/gmcc` |
-
-### 构建参数说明
-
-| 参数 | 说明 |
-|------|------|
-| `-s` | 去除符号表 |
-| `-w` | 去除 DWARF 调试信息 |
-| `-X main.Version=xxx` | 注入版本号到 main.Version 变量 |
-
----
-
-## 运行指南
-
-### 基础运行
+### 测试
 
 ```bash
-# 使用默认配置文件 (config.yaml)
-./gmcc.exe
-
-# 使用环境变量指定配置
-set GMCC_CONFIG=production.yaml
-./gmcc.exe
-```
-
-### 程序输出
-
-启动成功时，控制台将显示：
-
-```
-[INFO] gmcc 启动 (无界面模式)
-[INFO] 玩家: <player_id>
-[INFO] 服务器: <server_address>
-[INFO] 正在连接...
-```
-
-### 退出方式
-
-- **正常退出**: 按下 `Ctrl+C` 发送 SIGINT 信号
-- 程序会优雅地断开连接并清理资源
-
----
-
-## 测试参考
-
-### 运行测试
-
-```bash
-# 运行所有测试
 go test ./...
-
-# 运行特定包的测试
-go test ./pkg/binutil
-
-# 运行特定测试函数
-go test -v ./pkg/binutil -run TestReader_ReadVarInt
-
-# 运行测试并显示覆盖率
-go test -cover ./...
-
-# 运行基准测试
-go test -bench=. ./...
 ```
 
-### 测试标志
+### 格式化
 
-| 标志 | 说明 |
-|------|------|
-| `-v` | 详细输出模式 |
-| `-run <pattern>` | 仅运行匹配名称的测试 |
-| `-cover` | 显示覆盖率统计 |
-| `-bench=<pattern>` | 运行匹配的基准测试 |
+```bash
+go fmt ./...
+```
 
----
+## 11. 对接建议
 
-## 核心包 API 速览
+- 前端初始化时优先拉取 `GET /api/status`、`GET /api/accounts`、`GET /api/instances`
+- 创建实例前先校验账号 `auth_status`
+- Microsoft 登录成功后立即刷新账号列表
+- 删除账号前先确认没有关联实例
+- 若需要时间轴页面，可将操作日志作为后台管理时间线数据源
 
-### binutil 包
+## 12. 相关文档
 
-提供 Minecraft 协议所需的二进制数据读写功能。
-
-**类型:**
-- `VarInt` - 可变长度 32 位整数
-- `VarLong` - 可变长度 64 位整数
-- `Position` - 三维坐标 (X, Y, Z)
-- `UUID` - 16 字节 UUID
-
-**Reader 方法:**
-- `NewReader(data []byte) *Reader` - 从字节数组创建读取器
-- `ReadVarInt() (int32, error)` - 读取 VarInt
-- `ReadString() (string, error)` - 读取带长度前缀的字符串
-- `ReadBool() (bool, error)` - 读取布尔值
-- `ReadInt32() (int32, error)` - 读取大端序 int32
-- `ReadPosition() (x, y, z int32, err error)` - 读取位置坐标
-
-**Writer 方法:**
-- `NewWriter() *Writer` - 创建写入器
-- `WriteVarInt(v int32) error` - 写入 VarInt
-- `WriteString(s string) error` - 写入带长度前缀的字符串
-- `Bytes() []byte` - 获取写入的字节
-
-### config 包
-
-配置管理功能。
-
-**函数:**
-- `LoadWithAutoUpdate(path string, autoUpdate bool) (*Config, error)` - 加载配置，支持热更新
-
-**类型:**
-- `Config` - 完整配置结构
-- `AccountConfig` - 账户配置
-- `ServerConfig` - 服务器配置
-- `LogConfig` - 日志配置
-
-### httpx 包
-
-HTTP 客户端工具。
-
-**函数:**
-- `PostForm(rawURL string, form url.Values, ptr interface{}) (*HTTPResponse, error)` - 发送表单 POST
-- `PostJSON(rawURL string, reqBody interface{}, ptr interface{}) (*HTTPResponse, error)` - 发送 JSON POST
-
----
-
-## 版本信息
-
-- **当前版本**: 从构建参数注入 (`main.Version`)
-- **Go 版本要求**: 1.25.1+
-
----
-
-## 相关资源
-
-- 项目仓库: `<repository-url>`
-- 问题反馈: GitHub Issues
-- 构建脚本参考: `.github/workflows/release.yml`
+- `README.md`
+- `docs/auth.md`
+- `docs/api.md`

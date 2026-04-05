@@ -136,7 +136,8 @@ func TestResourceManager_DeleteAccountRemovesUnreferencedAccount(t *testing.T) {
 		{AccountID: "acc-other", Enabled: true},
 	})
 	instances := newFakeInstancesRepo([]state.InstanceMeta{{InstanceID: "bot-1", AccountID: "acc-other", ServerAddress: "mc.example.com", Enabled: true}})
-	rm := NewManager(accounts, instances, newFakeAuthStatus(nil, nil))
+	auth := newFakeAuthStatus(nil, nil)
+	rm := NewManager(accounts, instances, auth)
 
 	if err := rm.DeleteAccount("acc-main"); err != nil {
 		t.Fatal(err)
@@ -146,6 +147,27 @@ func TestResourceManager_DeleteAccountRemovesUnreferencedAccount(t *testing.T) {
 	}
 	if accounts.accounts[0].AccountID != "acc-other" {
 		t.Fatalf("want remaining account acc-other, got %+v", accounts.accounts[0])
+	}
+	if !auth.clearedFor("acc-main") {
+		t.Fatalf("expected auth state for acc-main to be cleared")
+	}
+}
+
+func TestResourceManager_DeleteAccountKeepsMetadataWhenAuthClearFails(t *testing.T) {
+	accounts := newFakeAccountsRepo([]state.AccountMeta{{AccountID: "acc-main", Enabled: true}})
+	auth := newFakeAuthStatus(nil, nil)
+	auth.clearErr = errors.New("vault unavailable")
+	rm := NewManager(accounts, newFakeInstancesRepo(nil), auth)
+
+	err := rm.DeleteAccount("acc-main")
+	if err == nil {
+		t.Fatal("expected delete account to fail when auth clear fails")
+	}
+	if len(accounts.accounts) != 1 || accounts.accounts[0].AccountID != "acc-main" {
+		t.Fatalf("expected account metadata to remain unchanged, got %+v", accounts.accounts)
+	}
+	if !auth.clearedFor("acc-main") {
+		t.Fatalf("expected auth clear to be attempted")
 	}
 }
 
@@ -233,6 +255,8 @@ func (r *fakeInstancesRepo) SaveAll(instances []state.InstanceMeta) error {
 type fakeAuthStatus struct {
 	statuses map[string]session.AccountAuthStatus
 	errs     map[string]error
+	cleared  []string
+	clearErr error
 }
 
 func newFakeAuthStatus(statuses map[string]session.AccountAuthStatus, errs map[string]error) *fakeAuthStatus {
@@ -253,4 +277,18 @@ func (f *fakeAuthStatus) GetAccountAuthStatus(accountID string) (session.Account
 		return status, nil
 	}
 	return "", session.ErrAccountNotFound
+}
+
+func (f *fakeAuthStatus) Clear(accountID string) error {
+	f.cleared = append(f.cleared, accountID)
+	return f.clearErr
+}
+
+func (f *fakeAuthStatus) clearedFor(accountID string) bool {
+	for _, cleared := range f.cleared {
+		if cleared == accountID {
+			return true
+		}
+	}
+	return false
 }

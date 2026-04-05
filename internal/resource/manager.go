@@ -198,6 +198,9 @@ func (m *Manager) DeleteAccount(accountID string) error {
 		}
 	}
 
+	if err := m.auth.Clear(accountID); err != nil {
+		return fmt.Errorf("clear account auth state: %w", err)
+	}
 	accounts = append(accounts[:index], accounts[index+1:]...)
 	if err := m.accounts.SaveAll(accounts); err != nil {
 		return fmt.Errorf("save accounts: %w", err)

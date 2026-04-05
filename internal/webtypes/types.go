@@ -105,7 +105,7 @@ type CreateInstanceRequest struct {
 	ID            string `json:"id" binding:"required"`
 	AccountID     string `json:"account_id" binding:"required"`
 	ServerAddress string `json:"server_address" binding:"required"`
-	Enabled       bool   `json:"enabled"`
+	Enabled       *bool  `json:"enabled,omitempty"`
 	AutoStart     bool   `json:"auto_start"`
 }
 

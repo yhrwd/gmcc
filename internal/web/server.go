@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -41,7 +42,7 @@ type accountReader interface {
 // NewServer 创建Web服务器
 func NewServer(config webtypes.WebConfig, configPath string, clusterManager *cluster.Manager, resourceManager accountReader, runtimeAuth *authsession.AuthManager) (*Server, error) {
 	// 创建审计日志管理器
-	logDir := "logs/audit"
+	logDir := auditLogDir(configPath)
 	auditLogger, err := audit.NewLogger(logDir, config.Auth.AuditLogRetentionDays)
 	if err != nil {
 		return nil, err
@@ -72,6 +73,13 @@ func NewServer(config webtypes.WebConfig, configPath string, clusterManager *clu
 	server.setupRoutes()
 
 	return server, nil
+}
+
+func auditLogDir(configPath string) string {
+	if configPath == "" {
+		return filepath.Join("logs", "audit")
+	}
+	return filepath.Join(filepath.Dir(configPath), "logs", "audit")
 }
 
 // setupRoutes 设置路由

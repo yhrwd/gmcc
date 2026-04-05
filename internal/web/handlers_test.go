@@ -193,6 +193,72 @@ func TestHandleCreateInstanceAllowsDistinctInstanceAndAccountIDs(t *testing.T) {
 	}
 }
 
+func TestHandleCreateInstanceDefaultsEnabledWhenOmitted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	clusterManager := cluster.NewManager(cluster.DefaultClusterConfig(), nil)
+	server := &Server{clusterManager: clusterManager, auditLogger: newTestAuditLogger(t)}
+
+	body := bytes.NewBufferString(`{"id":"bot-1","account_id":"acc-main","server_address":"mc.example.com"}`)
+	ctx, recorder := newBodyContext(http.MethodPost, "/api/instances", body)
+	server.handleCreateInstance(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	inst, err := clusterManager.GetInstance("bot-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inst.Account.Enabled {
+		t.Fatalf("expected omitted enabled to default true: %+v", inst.Account)
+	}
+}
+
+func TestHandleCreateInstanceHonorsExplicitDisabledFlag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	clusterManager := cluster.NewManager(cluster.DefaultClusterConfig(), nil)
+	server := &Server{clusterManager: clusterManager, auditLogger: newTestAuditLogger(t)}
+
+	body := bytes.NewBufferString(`{"id":"bot-1","account_id":"acc-main","server_address":"mc.example.com","enabled":false}`)
+	ctx, recorder := newBodyContext(http.MethodPost, "/api/instances", body)
+	server.handleCreateInstance(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	info, err := clusterManager.GetInstanceInfo("bot-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := clusterManager.GetInstance("bot-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Account.Enabled {
+		t.Fatalf("expected instance account to be disabled: %+v", info)
+	}
+}
+
+func TestHandleCreateInstanceRejectsAutoStartForDisabledInstance(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	clusterManager := cluster.NewManager(cluster.DefaultClusterConfig(), nil)
+	server := &Server{clusterManager: clusterManager, auditLogger: newTestAuditLogger(t)}
+
+	body := bytes.NewBufferString(`{"id":"bot-1","account_id":"acc-main","server_address":"mc.example.com","enabled":false,"auto_start":true}`)
+	ctx, recorder := newBodyContext(http.MethodPost, "/api/instances", body)
+	server.handleCreateInstance(ctx)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if clusterManager.InstanceExists("bot-1") {
+		t.Fatal("disabled auto-start request must not create an instance")
+	}
+}
+
 func TestHandleDeleteAccountReturnsErrorWhenAccountInUse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -205,6 +271,24 @@ func TestHandleDeleteAccountReturnsErrorWhenAccountInUse(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", recorder.Code)
+	}
+	if reader.deleteID != "acc-main" {
+		t.Fatalf("unexpected delete id: %q", reader.deleteID)
+	}
+}
+
+func TestHandleDeleteAccountDelegatesToResourceManager(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reader := &fakeAccountReader{get: map[string]resource.AccountRecord{}}
+	server := &Server{resourceManager: reader, auditLogger: newTestAuditLogger(t)}
+
+	ctx, recorder := newBodyContext(http.MethodDelete, "/api/accounts/acc-main", nil)
+	ctx.Params = gin.Params{{Key: "id", Value: "acc-main"}}
+	server.handleDeleteAccount(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if reader.deleteID != "acc-main" {
 		t.Fatalf("unexpected delete id: %q", reader.deleteID)

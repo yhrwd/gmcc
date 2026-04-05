@@ -219,10 +219,15 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 	account := cluster.AccountEntry{
 		ID:            req.AccountID,
 		ServerAddress: req.ServerAddress,
-		Enabled:       req.Enabled,
+		Enabled:       true,
 	}
-	if !req.Enabled {
-		account.Enabled = true
+	if req.Enabled != nil {
+		account.Enabled = *req.Enabled
+	}
+	if req.AutoStart && !account.Enabled {
+		s.logOperation(c, "instance_create", req.ID, req.AccountID, false, "disabled instance cannot auto start")
+		c.JSON(400, webtypes.OperationResponse{Success: false, Error: "disabled instance cannot auto start"})
+		return
 	}
 
 	if err := s.clusterManager.CreateInstance(req.ID, account); err != nil {

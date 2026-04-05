@@ -1,226 +1,161 @@
 # gmcc
 
-一个基于 Go 开发的 Minecraft 客户端应用程序，提供无界面/自动化游戏能力。
+gmcc 是一个面向 API 的无界面 Minecraft 客户端服务，重点提供账号管理、实例编排和前端友好的 HTTP 接口。
 
-[![Go Version](https://img.shields.io/badge/Go-1.25.1-blue.svg)](https://golang.org/dl/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+当前运行时模型拆分为三层：
 
----
+- account metadata：保存在 `.state/accounts.yaml` 的非敏感账号定义
+- instance metadata：保存在 `.state/instances.yaml` 的非敏感实例定义
+- auth vault：保存在 `auth.vault.path` 目录下的每账号加密认证记录
 
-## 功能特性
+这种结构适合作为自定义管理面板、自动化平台或集群控制台的后端服务。
 
-- **无界面模式** - 无需图形界面即可运行
-- **自动认证** - 支持 Microsoft 正版认证
-- **配置热更新** - 支持运行时自动重载配置
-- **多平台** - 支持 Windows、Linux、macOS
-- **结构化日志** - 支持文件和控制台双输出
+## 提供能力
 
----
+- 提供账号、实例、集群状态、Microsoft 设备码登录和操作日志的 REST API
+- 账号与实例解耦，一个账号可以支撑多个运行时实例
+- 认证信息使用加密 auth vault 存储，统一由环境变量主密钥保护
+- 重启后可通过 metadata 恢复资源，不把敏感信息写入明文 YAML
+- 提供带自动重连策略的集群运行时和状态查询能力
 
 ## 快速开始
 
-### 1. 克隆仓库
+### 1. 准备环境变量
+
+启动前先设置 auth vault 主密钥：
 
 ```bash
-git clone https://github.com/yourusername/gmcc.git
-cd gmcc
+# Windows PowerShell
+$env:GMCC_AUTH_VAULT_KEY = "replace-with-a-strong-secret"
+
+# Windows CMD
+set GMCC_AUTH_VAULT_KEY=replace-with-a-strong-secret
 ```
 
-### 2. 配置环境
-
-确保已安装 Go 1.25.1 或更高版本：
+### 2. 构建
 
 ```bash
-go version
-```
-
-### 3. 配置账户
-
-编辑 `config.yaml` 文件：
-
-```yaml
-account:
-    player_id: "YourPlayerID"          # 你的玩家 ID
-    use_official_auth: false            # 是否使用正版认证
-
-server:
-    address: "your.server.com:25565"  # 目标服务器地址
-
-log:
-    log_dir: "logs"
-    max_size: 512
-    debug: false
-    enable_file: true
-```
-
-### 4. 构建运行
-
-```bash
-# 构建
 go build -o gmcc.exe ./cmd/gmcc
+```
 
-# 运行
+### 3. 启动
+
+```bash
 ./gmcc.exe
 ```
 
----
-
-## 项目结构
-
-```
-gmcc/
-├── cmd/gmcc/          # 主程序入口
-├── internal/          # 内部业务逻辑
-│   ├── auth/         # 认证模块
-│   ├── config/       # 配置管理
-│   ├── headless/     # 无界面运行器
-│   ├── logx/         # 日志工具
-│   ├── mcclient/     # Minecraft 客户端
-│   └── session/      # 会话管理
-├── pkg/              # 公共库
-│   ├── binutil/      # 二进制数据工具
-│   └── httpx/        # HTTP 客户端
-├── docs/             # 文档
-└── config.yaml       # 默认配置文件
-```
-
----
-
-## 使用方法
-
-### 基本运行
-
-```bash
-# 使用默认配置文件
-./gmcc.exe
-
-# 指定配置文件
-set GMCC_CONFIG=production.yaml
-./gmcc.exe
-```
-
-### 构建选项
-
-```bash
-# 开发构建
-go build -o gmcc.exe ./cmd/gmcc
-
-# 生产构建（优化体积）
-go build -ldflags="-s -w" -o gmcc.exe ./cmd/gmcc
-
-# 带版本信息
-go build -ldflags="-s -w -X main.Version=v1.0.0" -o gmcc.exe ./cmd/gmcc
-```
-
-### 交叉编译
-
-```bash
-# Linux
-GOOS=linux GOARCH=amd64 go build -o gmcc-linux ./cmd/gmcc
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o gmcc-darwin ./cmd/gmcc
-
-# Windows
-GOOS=windows GOARCH=amd64 go build -o gmcc.exe ./cmd/gmcc
-```
-
----
+默认 API 监听地址为 `0.0.0.0:8080`。
 
 ## 配置说明
 
-### 配置文件 (config.yaml)
+默认从 `config.yaml` 加载配置，也可以通过 `GMCC_CONFIG` 指定其他路径。
 
-| 字段 | 说明 | 默认值 |
-|------|------|--------|
-| `account.player_id` | 玩家显示名称 | "your_player_id_here" |
-| `account.use_official_auth` | 使用正版认证 | false |
-| `server.address` | 服务器地址 | "127.0.0.1:25565" |
-| `log.log_dir` | 日志目录 | "logs" |
-| `log.max_size` | 日志大小上限 (KB) | 512 |
-| `log.debug` | 启用调试日志 | false |
-| `log.enable_file` | 启用文件日志 | true |
+示例：
 
-### 环境变量
+```yaml
+auth:
+  vault:
+    path: ".authvault"
+    key_env: "GMCC_AUTH_VAULT_KEY"
+    scrypt_n: 1048576
+    scrypt_r: 8
+    scrypt_p: 1
+    salt_len: 32
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `GMCC_CONFIG` | 配置文件路径 | "config.yaml" |
-| `GMCC_DISABLE_AUTO_UPDATE` | 禁用配置热更新 | false |
+cluster:
+  global:
+    max_instances: 10
+    reconnect_policy:
+      enabled: true
+      max_retries: 0
+      base_delay: 2s
+      max_delay: 2m
+      multiplier: 1.8
+  accounts: []
 
----
+web:
+  bind: "0.0.0.0:8080"
+  auth:
+    audit_log_retention_days: 30
+  cors:
+    enabled: true
+    origins:
+      - "http://localhost:5173"
+      - "http://localhost:3000"
 
-## 开发指南
-
-### 运行测试
-
-```bash
-# 运行所有测试
-go test ./...
-
-# 运行特定测试
-go test -v ./pkg/binutil -run TestReader_ReadVarInt
-
-# 覆盖率测试
-go test -cover ./...
+log:
+  log_dir: "logs"
+  max_size: 512
+  debug: false
+  enable_file: true
 ```
 
-### 代码规范
+## 运行时存储布局
+
+这里的“运行时基目录”默认指当前活动配置文件所在目录；如果通过 `GMCC_CONFIG` 指定了配置文件，则以该文件所在目录为准。
+
+- `config.yaml`: 服务配置
+- `.authvault/`: 每账号一个加密认证文件
+- `.state/accounts.yaml`: 账号 metadata
+- `.state/instances.yaml`: 实例 metadata
+- `logs/`: 运行日志（相对运行时基目录）
+- `logs/audit/`: JSONL 格式的操作审计日志（相对运行时基目录）
+
+## API 概览
+
+基础路径：`/api`
+
+读接口：
+
+- `GET /api/status`
+- `GET /api/accounts`
+- `GET /api/accounts/:id`
+- `GET /api/instances`
+- `GET /api/instances/:id`
+- `GET /api/logs/operations`
+
+写接口：
+
+- `POST /api/accounts`
+- `DELETE /api/accounts/:id`
+- `POST /api/instances`
+- `POST /api/instances/:id/start`
+- `POST /api/instances/:id/stop`
+- `POST /api/instances/:id/restart`
+- `DELETE /api/instances/:id`
+
+认证接口：
+
+- `POST /api/auth/microsoft/init`
+- `POST /api/auth/microsoft/poll`
+
+详细前端对接文档：
+
+- `docs/api.md`
+- `docs/auth.md`
+- `docs/reference.md`
+
+## 推荐前端接入流程
+
+1. 使用 `POST /api/accounts` 创建账号 metadata
+2. 使用 `POST /api/auth/microsoft/init` 发起 Microsoft 设备码登录
+3. 使用 `POST /api/auth/microsoft/poll` 轮询登录状态
+4. 当账号状态变为 `logged_in` 后，调用 `POST /api/instances` 创建实例
+5. 使用实例控制接口启动、停止或重启实例
+6. 使用 `GET /api/status`、`GET /api/instances`、`GET /api/logs/operations` 更新面板数据
+
+## 构建与测试
 
 ```bash
-# 格式化代码
 go fmt ./...
-
-# 检查代码
-go vet ./...
-
-# 整理导入
-goimports -w .
+go test ./...
+go build -o gmcc.exe ./cmd/gmcc
 ```
 
----
+## 说明
 
-## 文档
-
-- [项目参考文档](docs/reference.md) - 详细配置和 API 参考
-- [项目架构](docs/architecture.md) - 系统架构说明
-- [API 文档](docs/api.md) - 包 API 文档
-
----
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开 Pull Request
-
-请确保：
-- 代码通过 `go fmt` 和 `go vet` 检查
-- 所有测试通过
-- 提交信息清晰明了
-
----
-
-## 许可证
-
-本项目采用 [MIT](LICENSE) 许可证。
-
----
-
-## 感谢
-
-- 感谢所有贡献者
-- 使用 [PrismarineJS](https://github.com/PrismarineJS) 作为参考
-- 感谢 Go 社区提供的优秀工具
-
----
-
-<div align="center">
-
-**Made with ❤️ by the gmcc team**
-
-</div>
+- 当前服务是 API-only 运行模式，不再内置前端静态资源
+- `POST /api/instances` 要求目标账号已存在、已启用且认证状态可用
+- `POST /api/instances` 中 `enabled` 省略时默认 `true`；若显式传 `enabled=false`，则不能同时传 `auto_start=true`
+- 删除账号前必须先处理引用该账号的实例，否则会失败
+- auth vault 中是敏感数据，不应提交 `.authvault/` 或泄露主密钥环境变量
