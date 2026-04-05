@@ -284,8 +284,6 @@ func (m *Manager) InstanceExists(id string) bool {
 
 // handleInstanceStopped 处理实例停止事件（由实例调用）
 func (m *Manager) handleInstanceStopped(id string, err error) {
-	logx.Debugf("实例已停止: %s, err=%v", id, err)
-
 	// 这里可以触发重连逻辑
 	inst, getErr := m.GetInstance(id)
 	if getErr != nil {
@@ -299,7 +297,6 @@ func (m *Manager) handleInstanceStopped(id string, err error) {
 		}
 
 		if !m.beginSupervision(inst.ID) {
-			logx.Debugf("实例 %s 已在重连监督中，忽略重复触发", inst.ID)
 			return
 		}
 		go m.handleReconnect(inst)
@@ -329,8 +326,11 @@ func (m *Manager) handleReconnect(inst *Instance) {
 			}
 		}
 
-		logx.Infof("实例 %s 将在 %v 后重连 (尝试 %d/%d)",
-			inst.ID, delay, attempt+1, policy.MaxRetries)
+		m.emitReconnectEvent("warn", "scheduled", "instance reconnect scheduled", inst, "network_disconnect", map[string]any{
+			"attempt":     attempt + 1,
+			"backoff_ms":  delay.Milliseconds(),
+			"max_retries": policy.MaxRetries,
+		})
 
 		select {
 		case <-m.ctx.Done():
@@ -340,16 +340,32 @@ func (m *Manager) handleReconnect(inst *Instance) {
 
 		// 尝试启动（仅自动重连触发）
 		if err := inst.StartWithTrigger(StartTriggerAutoReconnect); err == nil {
-			logx.Infof("实例 %s 重连成功", inst.ID)
+			m.emitReconnectEvent("info", "succeeded", "instance reconnect succeeded", inst, "network_disconnect", map[string]any{
+				"attempt":     attempt + 1,
+				"max_retries": policy.MaxRetries,
+			})
 			inst.resetReconnectAttempts()
 			return
 		} else {
-			logx.Warnf("实例 %s 重连失败: %v", inst.ID, err)
+			m.emitReconnectEvent("warn", "failed", "instance reconnect attempt failed", inst, err.Error(), map[string]any{
+				"attempt":     attempt + 1,
+				"max_retries": policy.MaxRetries,
+			})
 			attempt = inst.bumpReconnectAttempts() - 1
 		}
 	}
 
-	logx.Errorf("实例 %s 重连次数用尽", inst.ID)
+	m.emitReconnectEvent("error", "exhausted", "instance reconnect retries exhausted", inst, "network_disconnect", map[string]any{
+		"attempt":     attempt,
+		"max_retries": policy.MaxRetries,
+	})
+}
+
+func (m *Manager) emitReconnectEvent(level, action, message string, inst *Instance, reason string, fields map[string]any) {
+	event := logx.NewReconnectEvent(level, action, message, inst.ID, inst.Account.ID, reason)
+	event.PlayerID = inst.Account.PlayerID
+	event.Fields = fields
+	logx.Emit(event)
 }
 
 // GetConfig 获取配置

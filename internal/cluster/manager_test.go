@@ -1,11 +1,16 @@
 package cluster
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	authsession "gmcc/internal/auth/session"
+	"gmcc/internal/logx"
 )
 
 func TestManager_StartDoesNotAutoLaunchEnabledAccounts(t *testing.T) {
@@ -159,5 +164,168 @@ func TestManager_AuthSessionErrorsDoNotReconnect(t *testing.T) {
 	m.supervisionMu.Unlock()
 	if hasReconnect {
 		t.Fatalf("auth failure should not trigger reconnect supervision")
+	}
+}
+
+func TestManager_ReconnectPolicyEmitsStructuredEvent(t *testing.T) {
+	logDir := t.TempDir()
+	if err := logx.Init(logDir, true, 1024, false); err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = logx.Close()
+	})
+
+	cfg := DefaultClusterConfig()
+	cfg.Global.ReconnectPolicy.Enabled = true
+	cfg.Global.ReconnectPolicy.BaseDelay = 10 * time.Millisecond
+	cfg.Global.ReconnectPolicy.MaxDelay = 10 * time.Millisecond
+	cfg.Global.ReconnectPolicy.Multiplier = 1
+	cfg.Global.ReconnectPolicy.MaxRetries = 1
+
+	m := NewManager(cfg, nil)
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	inst, err := m.GetInstance("a1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	factory := newScriptedRunnerFactory(
+		runnerOutcome{err: ErrRunnerNetworkDisconnect, ready: true, runDelay: 20 * time.Millisecond},
+		runnerOutcome{},
+	)
+	inst.runnerFactory = factory.Build
+
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+
+	eventsPath := filepath.Join(logDir, "gmcc-events.jsonl")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, readErr := os.ReadFile(eventsPath)
+		if readErr == nil {
+			content := string(data)
+			if strings.Contains(content, `"event_type":"instance.reconnect"`) &&
+				strings.Contains(content, `"action":"scheduled"`) &&
+				strings.Contains(content, `"action":"succeeded"`) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	var scheduled, succeeded bool
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if event["event_type"] != "instance.reconnect" {
+			continue
+		}
+		switch event["action"] {
+		case "scheduled":
+			scheduled = true
+			if got := event["reason"]; got != "network_disconnect" {
+				t.Fatalf("scheduled reason mismatch: %v", got)
+			}
+			if got := event["attempt"]; got != float64(1) {
+				t.Fatalf("scheduled attempt mismatch: %v", got)
+			}
+		case "succeeded":
+			succeeded = true
+			if got := event["attempt"]; got != float64(1) {
+				t.Fatalf("succeeded attempt mismatch: %v", got)
+			}
+		}
+	}
+
+	if !scheduled {
+		t.Fatalf("expected scheduled reconnect event")
+	}
+	if !succeeded {
+		t.Fatalf("expected succeeded reconnect event")
+	}
+
+	_ = m.Stop()
+}
+
+func TestManager_InstanceLifecycleEmitsStructuredEvents(t *testing.T) {
+	logDir := t.TempDir()
+	if err := logx.Init(logDir, true, 1024, false); err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = logx.Close()
+	})
+
+	cfg := DefaultClusterConfig()
+	cfg.Global.ReconnectPolicy.Enabled = false
+
+	m := NewManager(cfg, nil)
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1", ServerAddress: "example.org:25565"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	inst, err := m.GetInstance("a1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	factory := newScriptedRunnerFactory(runnerOutcome{ready: true})
+	inst.runnerFactory = factory.Build
+
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if err := inst.Stop(); err != nil {
+		t.Fatalf("stop instance: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	data, err := os.ReadFile(filepath.Join(logDir, "gmcc-events.jsonl"))
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	wantActions := map[string]bool{"start": false, "ready": false, "stop": false}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if event["event_type"] != "instance.lifecycle" {
+			continue
+		}
+		action, _ := event["action"].(string)
+		if _, ok := wantActions[action]; ok {
+			wantActions[action] = true
+			if got := event["instance_id"]; got != "a1" {
+				t.Fatalf("instance id mismatch for %s: %v", action, got)
+			}
+			if got := event["account_id"]; got != "a1" {
+				t.Fatalf("account id mismatch for %s: %v", action, got)
+			}
+		}
+	}
+
+	for action, seen := range wantActions {
+		if !seen {
+			t.Fatalf("expected lifecycle action %s in structured events", action)
+		}
 	}
 }

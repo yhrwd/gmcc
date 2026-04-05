@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -125,15 +126,19 @@ func (i *Instance) StartWithTrigger(trigger StartTrigger) error {
 		return i.startRunnerFn(i.runVersion)
 	}
 
-	if err := i.startRunnerLocked(i.runVersion); err != nil {
+	if err := i.startRunnerLocked(trigger, i.runVersion); err != nil {
 		_ = i.transitionToLocked(StatusError, err.Error())
+		i.emitLifecycleEvent("error", "error", "instance start failed", err.Error(), map[string]any{
+			"status":  string(StatusError),
+			"trigger": string(trigger),
+		})
 		return err
 	}
 
 	return nil
 }
 
-func (i *Instance) startRunnerLocked(runVersion uint64) error {
+func (i *Instance) startRunnerLocked(trigger StartTrigger, runVersion uint64) error {
 
 	// 创建配置
 	cfg := &config.Config{
@@ -173,9 +178,6 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 
 	go func() {
 		err := i.runner.Run(ctx)
-		if err != nil {
-			logx.Errorf("实例 %s 运行错误: %v", i.ID, err)
-		}
 		i.errChan <- err
 
 		category := classifyExitCategory(err)
@@ -202,7 +204,11 @@ func (i *Instance) startRunnerLocked(runVersion uint64) error {
 	// 等待实例就绪（异步）
 	go i.waitForReady()
 
-	logx.Infof("实例 %s 已启动: player_id=%s, server=%s", i.ID, i.Account.PlayerID, i.Account.ServerAddress)
+	i.emitLifecycleEvent("info", "start", "instance started", "", map[string]any{
+		"status":         string(StatusStarting),
+		"trigger":        string(trigger),
+		"server_address": i.Account.ServerAddress,
+	})
 	return nil
 }
 
@@ -221,7 +227,9 @@ func (i *Instance) Stop() error {
 	}
 
 	_ = i.transitionToLocked(StatusStopped, "")
-	logx.Infof("实例 %s 已停止", i.ID)
+	i.emitLifecycleEvent("info", "stop", "instance stopped", "", map[string]any{
+		"status": string(StatusStopped),
+	})
 	return nil
 }
 
@@ -329,8 +337,10 @@ func (i *Instance) waitForReady() {
 				return
 			}
 			i.resetReconnectAttemptsLocked() // 成功后重置重连计数
+			i.emitLifecycleEvent("info", "ready", "instance ready", "", map[string]any{
+				"status": string(StatusRunning),
+			})
 			i.mu.Unlock()
-			logx.Infof("实例 %s 已就绪", i.ID)
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -340,9 +350,12 @@ func (i *Instance) waitForReady() {
 	i.mu.Lock()
 	if i.status == StatusStarting || i.status == StatusReconnecting {
 		_ = i.transitionToLocked(StatusError, "timeout waiting for ready")
+		i.emitLifecycleEvent("warn", "error", "instance startup timed out", "timeout waiting for ready", map[string]any{
+			"status":        string(StatusError),
+			"exit_category": string(ExitCategoryStartupTimeout),
+		})
 	}
 	i.mu.Unlock()
-	logx.Warnf("实例 %s 启动超时", i.ID)
 }
 
 func (i *Instance) transitionToLocked(next InstanceStatus, reason string) error {
@@ -368,6 +381,10 @@ func (i *Instance) applyExitEvent(runVersion uint64, category ExitCategory, err 
 	}
 
 	if category == ExitCategoryNetworkDisconnect {
+		i.emitLifecycleEvent("warn", "disconnect", "instance disconnected", string(category), map[string]any{
+			"status":        string(StatusReconnecting),
+			"exit_category": string(category),
+		})
 		_ = i.transitionToLocked(StatusReconnecting, "network disconnect")
 		return true
 	}
@@ -379,10 +396,33 @@ func (i *Instance) applyExitEvent(runVersion uint64, category ExitCategory, err 
 		reason = err.Error()
 	}
 	_ = i.transitionToLocked(next, reason)
+	if category == ExitCategoryManualStop && err != nil {
+		return true
+	}
+	if next == StatusError {
+		i.emitLifecycleEvent("error", "error", "instance exited with error", reason, map[string]any{
+			"status":        string(next),
+			"exit_category": string(category),
+		})
+	} else {
+		i.emitLifecycleEvent("info", "stop", "instance stopped", "", map[string]any{
+			"status":        string(next),
+			"exit_category": string(category),
+		})
+	}
 
 	return true
 }
 
+func (i *Instance) emitLifecycleEvent(level, action, message, reason string, fields map[string]any) {
+	event := logx.NewLifecycleEvent(level, action, message, i.ID, i.Account.ID)
+	event.PlayerID = i.Account.PlayerID
+	if strings.TrimSpace(reason) != "" {
+		event.Reason = reason
+	}
+	event.Fields = fields
+	logx.Emit(event)
+}
 func (i *Instance) signalExit() {
 	select {
 	case i.exitCh <- struct{}{}:
