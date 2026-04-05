@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gmcc/internal/auth/microsoft"
+	"gmcc/internal/logx"
 )
 
 type tokenStore interface {
@@ -61,6 +62,7 @@ func (m *AuthManager) GetSession(ctx context.Context, accountID string) (AuthSes
 
 	now := time.Now().UTC()
 	if cache.HasValidMinecraftToken(now) {
+		m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
 		return cache.ToAuthSession(AuthSourceCache), nil
 	}
 	if cache.HasValidMicrosoftAccess(now) {
@@ -101,7 +103,12 @@ func (m *AuthManager) Clear(accountID string) error {
 	}
 	m.mu.Unlock()
 
-	return m.store.Delete(trimmedAccountID)
+	if err := m.store.Delete(trimmedAccountID); err != nil {
+		return err
+	}
+
+	m.emitAuthEvent("clear", "account session cleared", trimmedAccountID, nil, "success")
+	return nil
 }
 
 func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
@@ -124,6 +131,7 @@ func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string,
 		now := time.Now().UTC()
 		if latest.HasValidMinecraftToken(now) {
 			session := latest.ToAuthSession(AuthSourceCache)
+			m.emitAuthEvent("cache_hit", "account session cache hit", accountID, nil, "success")
 			m.mu.Lock()
 			pending.session = session
 			pending.err = nil
@@ -196,6 +204,13 @@ func (m *AuthManager) completeSessionFromMicrosoft(ctx context.Context, accountI
 		return AuthSession{}, fmt.Errorf("save refreshed account token cache: %w", err)
 	}
 
+	switch source {
+	case AuthSourceRefresh:
+		m.emitAuthEvent("refresh", "account session refreshed", accountID, nil, "success")
+	case AuthSourceDeviceLogin:
+		m.emitAuthEvent("device_login_succeeded", "device login succeeded", accountID, nil, "success")
+	}
+
 	return next.ToAuthSession(source), nil
 }
 
@@ -211,6 +226,8 @@ func (m *AuthManager) BeginDeviceLogin(ctx context.Context, accountID string) (D
 	if info.PollInterval <= 0 {
 		info.PollInterval = 2 * time.Second
 	}
+
+	m.emitAuthEvent("device_login_started", "device login started", trimmedAccountID, nil, string(DeviceLoginStatusPending))
 
 	pollCtx, cancel := context.WithCancel(context.Background())
 
@@ -263,6 +280,8 @@ func (m *AuthManager) CancelDeviceLogin(accountID string) error {
 	if cancel != nil {
 		cancel()
 	}
+
+	m.emitAuthEvent("device_login_cancelled", "device login cancelled", trimmedAccountID, ErrDeviceLoginRequired, string(DeviceLoginStatusCancelled))
 
 	return nil
 }
@@ -340,6 +359,7 @@ func (m *AuthManager) finishDeviceFlowExpired(accountID string, flow *deviceLogi
 	current.status = DeviceLoginStatusExpired
 	current.session = nil
 	current.err = ErrDeviceLoginRequired
+	m.emitAuthEvent("device_login_expired", "device login expired", accountID, ErrDeviceLoginRequired, string(DeviceLoginStatusExpired))
 }
 
 func (m *AuthManager) finishDeviceFlowFailed(accountID string, flow *deviceLoginFlow, err error) {
@@ -354,6 +374,43 @@ func (m *AuthManager) finishDeviceFlowFailed(accountID string, flow *deviceLogin
 	current.status = DeviceLoginStatusFailed
 	current.session = nil
 	current.err = err
+	m.emitAuthEvent("device_login_failed", "device login failed", accountID, err, string(DeviceLoginStatusFailed))
+}
+
+func (m *AuthManager) emitAuthEvent(action, message, accountID string, authErr error, result string) {
+	logx.Emit(newAuthEvent(action, message, accountID, authErr, result))
+}
+
+func newAuthEvent(action, message, accountID string, authErr error, result string) logx.Event {
+	level := "info"
+	if authErr != nil {
+		level = "warn"
+	}
+
+	return logx.NewAuthEvent(level, action, message, "", strings.TrimSpace(accountID), authErrorCode(authErr), result)
+}
+
+func authErrorCode(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrDeviceLoginRequired):
+		return "device_login_required"
+	case errors.Is(err, ErrRefreshTokenInvalid):
+		return "refresh_token_invalid"
+	case errors.Is(err, ErrRefreshUpstream):
+		return "refresh_upstream_failed"
+	case errors.Is(err, ErrProviderUnavailable):
+		return "provider_unavailable"
+	case errors.Is(err, ErrOwnershipFailed):
+		return "ownership_failed"
+	case errors.Is(err, ErrProfileInvalid):
+		return "profile_invalid"
+	case errors.Is(err, ErrXSTSDenied):
+		return "xsts_denied"
+	default:
+		return "unknown"
+	}
 }
 
 func deviceLoginExpired(expiresAt time.Time) bool {
@@ -410,6 +467,7 @@ func (m *AuthManager) persistAuthFailure(accountID string, base *TokenCache, aut
 	if authErr == nil {
 		return nil
 	}
+	m.emitAuthEvent("auth_failed", "account session authentication failed", accountID, authErr, "failed")
 	cache := NewTokenCache(accountID)
 	if base != nil {
 		copy := *base

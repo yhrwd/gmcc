@@ -2,11 +2,17 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"gmcc/internal/logx"
 )
 
 func TestAuthManager_GetSessionSingleFlightRefresh(t *testing.T) {
@@ -266,6 +272,138 @@ func TestAuthManager_PersistsLastAuthError(t *testing.T) {
 	}
 }
 
+func TestAuthManager_EmitsAuthEvents(t *testing.T) {
+	tests := []struct {
+		name         string
+		action       func(t *testing.T, mgr *AuthManager)
+		wantAction   string
+		wantResult   string
+		wantAuthErr  string
+		wantContains string
+	}{
+		{
+			name: "cache hit",
+			action: func(t *testing.T, mgr *AuthManager) {
+				t.Helper()
+				store := mgr.store.(*fakeTokenStore)
+				store.caches["acc-main"] = &TokenCache{
+					AccountID: "acc-main",
+					Minecraft: MinecraftTokenCache{
+						AccessToken: "mc-cache",
+						ProfileID:   "uuid-cache",
+						ProfileName: "Steve",
+						ExpiresAt:   time.Now().Add(10 * time.Minute),
+					},
+				}
+				if _, err := mgr.GetSession(context.Background(), "acc-main"); err != nil {
+					t.Fatalf("get session: %v", err)
+				}
+			},
+			wantAction:   "cache_hit",
+			wantResult:   "success",
+			wantContains: "account session cache hit",
+		},
+		{
+			name: "refresh",
+			action: func(t *testing.T, mgr *AuthManager) {
+				t.Helper()
+				if _, err := mgr.Refresh(context.Background(), "acc-main"); err != nil {
+					t.Fatalf("refresh: %v", err)
+				}
+			},
+			wantAction:   "refresh",
+			wantResult:   "success",
+			wantContains: "account session refreshed",
+		},
+		{
+			name: "device login start and clear",
+			action: func(t *testing.T, mgr *AuthManager) {
+				t.Helper()
+				provider := mgr.provider.(*fakeProvider)
+				provider.deviceLoginInfo = DeviceLoginInfo{
+					AccountID:       "acc-main",
+					UserCode:        "ABCD",
+					VerificationURI: "https://microsoft.com/devicelogin",
+					ExpiresAt:       time.Now().UTC().Add(2 * time.Second),
+					PollInterval:    50 * time.Millisecond,
+				}
+				if _, err := mgr.BeginDeviceLogin(context.Background(), "acc-main"); err != nil {
+					t.Fatalf("begin device login: %v", err)
+				}
+				if err := mgr.Clear("acc-main"); err != nil {
+					t.Fatalf("clear: %v", err)
+				}
+			},
+			wantAction:   "clear",
+			wantResult:   "success",
+			wantContains: "account session cleared",
+		},
+		{
+			name: "auth failure",
+			action: func(t *testing.T, mgr *AuthManager) {
+				t.Helper()
+				mgr.provider.(*fakeProvider).refreshErr = errors.New("invalid_grant")
+				_, err := mgr.Refresh(context.Background(), "acc-main")
+				if !errors.Is(err, ErrRefreshTokenInvalid) {
+					t.Fatalf("want ErrRefreshTokenInvalid, got %v", err)
+				}
+			},
+			wantAction:   "auth_failed",
+			wantResult:   "failed",
+			wantAuthErr:  "refresh_token_invalid",
+			wantContains: "account session authentication failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logDir := t.TempDir()
+			if err := logx.Init(logDir, true, 1024*1024, false); err != nil {
+				t.Fatalf("init logx: %v", err)
+			}
+			defer logx.Close()
+
+			provider := newFakeProvider()
+			provider.refreshResult = fakeRefreshResult{
+				session: AuthSession{
+					AccountID:            "acc-main",
+					MinecraftAccessToken: "mc-1",
+					ProfileID:            "uuid",
+					ProfileName:          "Steve",
+				},
+			}
+			mgr := NewAuthManager(newFakeTokenStore(), provider)
+
+			tt.action(t, mgr)
+
+			events := readAuthEvents(t, filepath.Join(logDir, "gmcc-events.jsonl"))
+			event := events[len(events)-1]
+			if event["event_type"] != "auth.session" {
+				t.Fatalf("want auth.session event type, got %#v", event["event_type"])
+			}
+			if event["action"] != tt.wantAction {
+				t.Fatalf("want action %q, got %#v", tt.wantAction, event["action"])
+			}
+			if event["account_id"] != "acc-main" {
+				t.Fatalf("want account_id acc-main, got %#v", event["account_id"])
+			}
+			if tt.wantResult != "" && event["result"] != tt.wantResult {
+				t.Fatalf("want result %q, got %#v", tt.wantResult, event["result"])
+			}
+			if tt.wantAuthErr == "" {
+				if _, ok := event["auth_error"]; ok {
+					t.Fatalf("did not expect auth_error, got %#v", event["auth_error"])
+				}
+			} else if event["auth_error"] != tt.wantAuthErr {
+				t.Fatalf("want auth_error %q, got %#v", tt.wantAuthErr, event["auth_error"])
+			}
+			if !strings.Contains(event["message"].(string), tt.wantContains) {
+				t.Fatalf("want message containing %q, got %#v", tt.wantContains, event["message"])
+			}
+		})
+	}
+}
+
 func TestAuthManager_ClearRemovesCacheAndFlowState(t *testing.T) {
 	provider := newFakeProvider()
 	provider.deviceLoginInfo = DeviceLoginInfo{
@@ -441,4 +579,31 @@ func waitForDeviceLoginFinalState(t *testing.T, mgr *AuthManager, accountID stri
 	status, session, err := mgr.GetDeviceLoginStatus(accountID)
 	t.Fatalf("timed out waiting for final status; current status=%s err=%v", status, err)
 	return status, session, fmt.Errorf("unreachable")
+}
+
+func readAuthEvents(t *testing.T, path string) []map[string]any {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read auth event log: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	events := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("unmarshal auth event %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one auth event")
+	}
+	return events
 }

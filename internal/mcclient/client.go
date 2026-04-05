@@ -214,14 +214,14 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 
 	if c.cfg.Account.UseOfficialAuth {
-		logx.Infof("已启用正版认证 (account.use_official_auth=true)")
+		logx.Summaryf("info", "已启用正版认证 (account.use_official_auth=true)")
 		if err := c.prepareOnlineSession(); err != nil {
 			return err
 		}
 		return c.connectAndLoop(ctx, host, port, true)
 	}
 
-	logx.Infof("使用离线模式 (account.use_official_auth=false)")
+	logx.Summaryf("info", "使用离线模式 (account.use_official_auth=false)")
 	err = c.connectAndLoop(ctx, host, port, false)
 	if errors.Is(err, errOnlineAuthRequired) {
 		return fmt.Errorf("服务器要求正版会话认证，请将 account.use_official_auth 设为 true")
@@ -367,7 +367,7 @@ func (c *Client) prepareOnlineSession() error {
 	if err := c.setOnlineSession(authSession.MinecraftAccessToken, authSession.ProfileID, authSession.ProfileName); err != nil {
 		return err
 	}
-	logx.Infof("正版认证成功: %s (%s)", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
+	logx.Summaryf("info", "正版认证成功: %s (%s)", c.online.ProfileName, packet.FormatUUID(c.online.ProfileUUID))
 	return nil
 }
 
@@ -782,7 +782,6 @@ func (c *Client) handleEncryptionRequest(data []byte) error {
 		if err := mcauth.JoinServer(c.online.AccessToken, c.online.ProfileID, serverHash); err != nil {
 			return fmt.Errorf("正版会话认证失败: %w", err)
 		}
-		logx.Infof("正版会话认证成功")
 	}
 
 	encryptedSecret, err := rsa.EncryptPKCS1v15(rand.Reader, pubKey, sharedSecret)
@@ -808,11 +807,6 @@ func (c *Client) handleEncryptionRequest(data []byte) error {
 	}
 	if err := c.conn.EnableEncryption(sharedSecret); err != nil {
 		return fmt.Errorf("启用 AES/CFB8 加密失败: %w", err)
-	}
-	if shouldAuthenticate {
-		logx.Infof("已完成正版加密握手, serverId=%q", serverID)
-	} else {
-		logx.Infof("已完成非会话加密握手, serverId=%q", serverID)
 	}
 	return nil
 }
