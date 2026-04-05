@@ -53,3 +53,9 @@ id.txt
 .agents/
 skills-lock.json
 my-knowledge-skill/
+frontend/dist/
+frontend/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.keep
+build/
+release/

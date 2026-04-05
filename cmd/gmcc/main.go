@@ -70,6 +70,7 @@ func main() {
 		logx.Errorf("Web服务器创建失败: %v", err)
 		os.Exit(1)
 	}
+	logx.Infof("Web UI 模式: %s", describeWebUIMode(server.HasEmbeddedUI()))
 
 	// 启动Web服务器
 	go func() {
@@ -88,6 +89,13 @@ func main() {
 	if err := runtime.ClusterManager.Stop(); err != nil {
 		logx.Errorf("集群管理器停止错误: %v", err)
 	}
+}
+
+func describeWebUIMode(hasUI bool) string {
+	if hasUI {
+		return "embedded"
+	}
+	return "api-only"
 }
 
 func buildRuntime(configPath string, cfg *config.Config) (*runtimeDeps, error) {

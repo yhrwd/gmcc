@@ -144,6 +144,26 @@ log:
 5. 使用实例控制接口启动、停止或重启实例
 6. 使用 `GET /api/status`、`GET /api/instances`、`GET /api/logs/operations` 更新面板数据
 
+## 可选内嵌前端工作流
+
+- 默认直接执行 `go build -o gmcc.exe ./cmd/gmcc` 时，gmcc 会以 API-only 方式构建；仓库内只保留 `internal/webui/dist/.keep` 占位文件，不会默认内嵌任何前端资源。
+- 如果存在已构建好的前端产物，可先放到 `frontend/dist/`，再运行打包工具把允许内嵌的资源复制到 `internal/webui/dist/` 并完成最终构建。
+- 打包工具入口为 `go run ./tools/packager`，默认会读取 `frontend/dist`，生成 `build/gmcc.exe`（非 Windows 为 `build/gmcc`）。
+- 允许进入内嵌目录的文件目前包括根目录下的 `index.html`、`favicon.ico`、`favicon.svg`、`manifest.webmanifest`、`robots.txt`，以及 `assets/` 下的非隐藏资源文件；`.map` 文件和隐藏文件/目录会被忽略。
+- 如果 `frontend/dist` 不存在，或过滤后没有得到 `index.html`，打包工具会清理 `internal/webui/dist/` 回到仅保留 `.keep`，并继续产出 API-only 二进制。
+
+示例：
+
+```bash
+go run ./tools/packager
+```
+
+运行时行为：
+
+- 所有 `/api` 路径始终由 API 处理。
+- 当内嵌前端可用时，非 `/api` 的 `GET` / `HEAD` 请求会优先返回静态资源，不存在的前端路由会回退到 `index.html`。
+- 当内嵌前端不可用时，非 `/api` 的 `GET` / `HEAD` 请求返回 `503 Frontend unavailable` 页面，其他非 `/api` 方法返回 `404`。
+
 ## 构建与测试
 
 ```bash
@@ -154,7 +174,7 @@ go build -o gmcc.exe ./cmd/gmcc
 
 ## 说明
 
-- 当前服务是 API-only 运行模式，不再内置前端静态资源
+- 当前服务默认以 API-only 方式构建和运行；只有在显式准备并内嵌前端产物后，才会对外提供前端静态资源
 - `POST /api/instances` 要求目标账号已存在、已启用且认证状态可用
 - `POST /api/instances` 中 `enabled` 省略时默认 `true`；若显式传 `enabled=false`，则不能同时传 `auto_start=true`
 - 删除账号前必须先处理引用该账号的实例，否则会失败

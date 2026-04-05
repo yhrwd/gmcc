@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"gmcc/internal/state"
 	"gmcc/internal/web/audit"
 	"gmcc/internal/webtypes"
+	"gmcc/internal/webui"
 )
 
 // Server Web服务器
@@ -30,6 +32,7 @@ type Server struct {
 	resourceManager accountReader
 	runtimeAuth     *authsession.AuthManager
 	auditLogger     *audit.Logger
+	uiAssets        webui.UIAssets
 }
 
 type accountReader interface {
@@ -51,22 +54,14 @@ func NewServer(config webtypes.WebConfig, configPath string, clusterManager *clu
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
 
-	// 创建Gin路由
-	router := gin.New()
-	router.Use(gin.Recovery())
-
-	// 禁用自动重定向
-	router.HandleMethodNotAllowed = false
-	router.RedirectFixedPath = false
-
 	server := &Server{
 		config:          config,
 		configPath:      configPath,
-		router:          router,
 		clusterManager:  clusterManager,
 		resourceManager: resourceManager,
 		runtimeAuth:     runtimeAuth,
 		auditLogger:     auditLogger,
+		uiAssets:        webui.NewEmbeddedAssets(),
 	}
 
 	// 设置路由
@@ -84,6 +79,11 @@ func auditLogDir(configPath string) string {
 
 // setupRoutes 设置路由
 func (s *Server) setupRoutes() {
+	s.router = gin.New()
+	s.router.Use(gin.Recovery())
+	s.router.HandleMethodNotAllowed = false
+	s.router.RedirectFixedPath = false
+
 	// CORS中间件
 	if s.config.CORS.Enabled {
 		s.router.Use(s.corsMiddleware())
@@ -116,28 +116,84 @@ func (s *Server) setupRoutes() {
 		api.GET("/logs/operations", s.handleGetOperationLogs)
 	}
 
-	// API 模式 - 只提供 API 服务，不提供前端静态文件
-	s.router.NoRoute(func(c *gin.Context) {
-		path := c.Request.URL.Path
+	s.router.NoRoute(s.handleNoRoute)
+}
 
-		// API 返回 404
-		if len(path) >= 4 && path[:4] == "/api" {
-			c.JSON(404, webtypes.OperationResponse{
-				Success: false,
-				Error:   "API endpoint not found",
-			})
+func (s *Server) handleNoRoute(c *gin.Context) {
+	requestPath := c.Request.URL.Path
+	if isAPIPath(requestPath) {
+		c.JSON(http.StatusNotFound, webtypes.OperationResponse{
+			Success: false,
+			Error:   "API endpoint not found",
+		})
+		return
+	}
+
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	if s.uiAssets != nil {
+		file, err := s.uiAssets.LookupAsset(requestPath)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		if file != nil {
+			serveAsset(c, file)
 			return
 		}
 
-		// 静态文件路径返回 404
-		if len(path) >= 8 && path[:8] == "/assets/" {
-			c.String(404, "Not Found")
+		if s.uiAssets.IsAssetLikePath(requestPath) {
+			c.String(http.StatusNotFound, "Not Found")
 			return
 		}
 
-		// API 模式 - 只返回 JSON 错误
-		c.JSON(404, gin.H{"error": "API endpoint not found"})
-	})
+		if !s.uiAssets.HasIndex() {
+			serveFrontendUnavailable(c)
+			return
+		}
+
+		file, err = s.uiAssets.OpenIndex()
+		if err != nil || file == nil {
+			c.String(http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		serveAsset(c, file)
+		return
+	}
+
+	serveFrontendUnavailable(c)
+}
+
+func isAPIPath(requestPath string) bool {
+	return requestPath == "/api" || requestPath == "/api/" || strings.HasPrefix(requestPath, "/api/")
+}
+
+func serveAsset(c *gin.Context, file *webui.AssetFile) {
+	if file.ContentType != "" {
+		c.Header("Content-Type", file.ContentType)
+	}
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Data(http.StatusOK, file.ContentType, file.Content)
+}
+
+func serveFrontendUnavailable(c *gin.Context) {
+	body := "<html><body><h1>Frontend unavailable</h1><p>前端尚未构建，当前服务仅提供 API。</p></body></html>"
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	c.Data(http.StatusServiceUnavailable, "text/html; charset=utf-8", []byte(body))
+}
+
+func (s *Server) HasEmbeddedUI() bool {
+	return s.uiAssets != nil && s.uiAssets.HasIndex()
 }
 
 // corsMiddleware CORS中间件

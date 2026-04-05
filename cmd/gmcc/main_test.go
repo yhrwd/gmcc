@@ -7,6 +7,23 @@ import (
 	"gmcc/internal/config"
 )
 
+func TestDescribeWebUIMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		hasUI bool
+		want  string
+	}{
+		{name: "with ui", hasUI: true, want: "embedded"},
+		{name: "without ui", hasUI: false, want: "api-only"},
+	}
+
+	for _, tt := range tests {
+		if got := describeWebUIMode(tt.hasUI); got != tt.want {
+			t.Fatalf("%s: want %q, got %q", tt.name, tt.want, got)
+		}
+	}
+}
+
 func TestBuildRuntime_InitializesVaultAndMetadata(t *testing.T) {
 	t.Setenv("GMCC_AUTH_VAULT_KEY", "test-master-key")
 
