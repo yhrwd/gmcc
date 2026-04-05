@@ -259,12 +259,6 @@ func (c *Client) connectAndLoop(ctx context.Context, host string, port uint16, u
 		}
 	}()
 
-	if useOnline {
-		logx.Infof("已连接服务器: %s (online-mode)", addr)
-	} else {
-		logx.Infof("已连接服务器: %s (offline-mode attempt)", addr)
-	}
-
 	if err := c.sendHandshake(host, port); err != nil {
 		return err
 	}

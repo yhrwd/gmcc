@@ -22,7 +22,7 @@ type Logger struct {
 // NewLogger 创建审计日志管理器
 func NewLogger(logDir string, retentionDays int) (*Logger, error) {
 	// 确保日志目录存在
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create audit log directory: %w", err)
 	}
 
@@ -55,7 +55,7 @@ func (l *Logger) Log(log *webtypes.OperationLog) error {
 	}
 
 	// 追加写入文件
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -65,7 +65,6 @@ func (l *Logger) Log(log *webtypes.OperationLog) error {
 		return fmt.Errorf("failed to write log entry: %w", err)
 	}
 
-	logx.Debugf("审计日志已记录: action=%s, password_id=%s, success=%v", log.Action, log.PasswordID, log.Success)
 	return nil
 }
 

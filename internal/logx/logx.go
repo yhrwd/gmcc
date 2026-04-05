@@ -136,24 +136,6 @@ func Emit(event Event) {
 	}
 }
 
-// LogTokenCache 记录token缓存状态
-func LogTokenCache(tokenType string, profileName string, profileID string) {
-	if profileName != "" {
-		Infof("使用缓存的 %s token: %s (%s)", tokenType, profileName, profileID)
-	} else {
-		Infof("使用缓存的 %s token", tokenType)
-	}
-}
-
-// LogTokenExpired 记录token过期状态
-func LogTokenExpired(tokenType string, err error) {
-	if err != nil {
-		Warnf("缓存 %s token 已失效: %v", tokenType, err)
-	} else {
-		Warnf("缓存 %s token 已失效", tokenType)
-	}
-}
-
 func logf(level string, writeFile bool, format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()

@@ -331,6 +331,7 @@ func (m *Manager) handleReconnect(inst *Instance) {
 			"backoff_ms":  delay.Milliseconds(),
 			"max_retries": policy.MaxRetries,
 		})
+		logx.Summaryf("warn", "实例 %s 断线，计划在 %s 后重连（第 %d 次）", inst.ID, delay, attempt+1)
 
 		select {
 		case <-m.ctx.Done():
@@ -344,6 +345,7 @@ func (m *Manager) handleReconnect(inst *Instance) {
 				"attempt":     attempt + 1,
 				"max_retries": policy.MaxRetries,
 			})
+			logx.Summaryf("info", "实例 %s 重连成功", inst.ID)
 			inst.resetReconnectAttempts()
 			return
 		} else {
@@ -351,6 +353,7 @@ func (m *Manager) handleReconnect(inst *Instance) {
 				"attempt":     attempt + 1,
 				"max_retries": policy.MaxRetries,
 			})
+			logx.Warnf("实例 %s 重连失败（第 %d 次）: %v", inst.ID, attempt+1, err)
 			attempt = inst.bumpReconnectAttempts() - 1
 		}
 	}
@@ -359,6 +362,7 @@ func (m *Manager) handleReconnect(inst *Instance) {
 		"attempt":     attempt,
 		"max_retries": policy.MaxRetries,
 	})
+	logx.Errorf("实例 %s 重连次数已耗尽", inst.ID)
 }
 
 func (m *Manager) emitReconnectEvent(level, action, message string, inst *Instance, reason string, fields map[string]any) {
