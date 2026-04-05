@@ -16,7 +16,7 @@ import (
 func newTestServerWithAssets(t *testing.T, fsys fstest.MapFS) *Server {
 	t.Helper()
 
-	server, err := NewServer(webtypes.WebConfig{}, "", cluster.NewManager(cluster.ClusterConfig{}, nil), nil, nil)
+	server, err := NewServer(webtypes.WebConfig{}, "", cluster.NewManager(cluster.ClusterConfig{}, nil), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestNewServerInitializesConfigRelativeAuditDir(t *testing.T) {
 	tmp := t.TempDir()
 	configPath := filepath.Join(tmp, "config.yaml")
 
-	server, err := NewServer(webtypes.WebConfig{}, configPath, cluster.NewManager(cluster.ClusterConfig{}, nil), nil, nil)
+	server, err := NewServer(webtypes.WebConfig{}, configPath, cluster.NewManager(cluster.ClusterConfig{}, nil), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

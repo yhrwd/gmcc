@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"gmcc/internal/cluster"
 	"gmcc/internal/logx"
 	"gmcc/internal/resource"
+	"gmcc/internal/systemmetrics"
 	"gmcc/internal/webtypes"
 )
 
@@ -97,6 +99,36 @@ func (s *Server) handleGetInstance(c *gin.Context) {
 	}
 
 	c.JSON(200, s.buildInstanceView(info))
+}
+
+// handleGetResources 获取宿主机系统资源
+func (s *Server) handleGetResources(c *gin.Context) {
+	if s.resourceCollector == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "resource metrics collector not initialized"})
+		return
+	}
+
+	snapshot, err := s.resourceCollector.Collect()
+	if err != nil {
+		logx.Warnf("采集系统资源失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to collect system resources"})
+		return
+	}
+
+	c.JSON(http.StatusOK, buildResourceSnapshotView(snapshot))
+}
+
+func buildResourceSnapshotView(snapshot systemmetrics.Snapshot) webtypes.ResourceSnapshotView {
+	return webtypes.ResourceSnapshotView{
+		CPUPercent: snapshot.CPUPercent,
+		Memory: webtypes.ResourceMemoryView{
+			TotalBytes:     snapshot.Memory.TotalBytes,
+			UsedBytes:      snapshot.Memory.UsedBytes,
+			AvailableBytes: snapshot.Memory.AvailableBytes,
+			UsedPercent:    snapshot.Memory.UsedPercent,
+		},
+		CollectedAt: snapshot.CollectedAt,
+	}
 }
 
 // handleStartInstance 启动实例

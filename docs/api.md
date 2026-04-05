@@ -15,6 +15,7 @@
 ```text
 加载首页
   -> GET /api/status
+  -> GET /api/resources
   -> GET /api/accounts
   -> GET /api/instances
 
@@ -133,6 +134,39 @@
 错误：
 
 - `404 {"error":"instance not found"}`
+
+### 3.6 获取宿主机系统资源
+
+`GET /api/resources`
+
+响应示例：
+
+```json
+{
+  "cpu_percent": 12.5,
+  "memory": {
+    "total_bytes": 17179869184,
+    "used_bytes": 8589934592,
+    "available_bytes": 7516192768,
+    "used_percent": 50
+  },
+  "collected_at": "2026-04-05T12:00:00Z"
+}
+```
+
+字段：
+
+- `cpu_percent`: 当前宿主机 CPU 总体使用率，范围 `0-100`
+- `memory.total_bytes`: 当前宿主机内存总量，单位字节
+- `memory.used_bytes`: 当前宿主机已使用内存，单位字节
+- `memory.available_bytes`: 当前宿主机可用内存，单位字节
+- `memory.used_percent`: 当前宿主机内存使用率，范围 `0-100`
+- `collected_at`: 本次采集时间，UTC `RFC3339` 时间戳
+
+错误：
+
+- `503 {"error":"resource metrics collector not initialized"}`
+- `500 {"error":"failed to collect system resources"}`
 
 ## 4. 账号管理接口
 
@@ -443,6 +477,7 @@ GET /api/logs/operations?start=2026-04-01T00:00:00Z&end=2026-04-05T23:59:59Z
 初始化拉取：
 
 - `GET /api/status`
+- `GET /api/resources`
 - `GET /api/accounts`
 - `GET /api/instances`
 

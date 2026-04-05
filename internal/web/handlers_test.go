@@ -3,17 +3,32 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"gmcc/internal/cluster"
 	"gmcc/internal/resource"
 	"gmcc/internal/state"
+	"gmcc/internal/systemmetrics"
 	"gmcc/internal/web/audit"
 )
+
+type fakeResourceCollector struct {
+	snapshot systemmetrics.Snapshot
+	err      error
+}
+
+func (f fakeResourceCollector) Collect() (systemmetrics.Snapshot, error) {
+	if f.err != nil {
+		return systemmetrics.Snapshot{}, f.err
+	}
+	return f.snapshot, nil
+}
 
 type fakeAccountReader struct {
 	list        []resource.AccountRecord
@@ -292,6 +307,96 @@ func TestHandleDeleteAccountDelegatesToResourceManager(t *testing.T) {
 	}
 	if reader.deleteID != "acc-main" {
 		t.Fatalf("unexpected delete id: %q", reader.deleteID)
+	}
+}
+
+func TestHandleGetResourcesReturnsSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := &Server{
+		resourceCollector: fakeResourceCollector{snapshot: systemmetrics.Snapshot{
+			CPUPercent: 12.5,
+			Memory: systemmetrics.MemorySnapshot{
+				TotalBytes:     16,
+				UsedBytes:      8,
+				AvailableBytes: 7,
+				UsedPercent:    50,
+			},
+			CollectedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC),
+		}},
+		auditLogger: newTestAuditLogger(t),
+	}
+
+	ctx, recorder := newJSONContext(http.MethodGet, "/api/resources")
+	server.handleGetResources(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := payload["cpu_percent"]; got != 12.5 {
+		t.Fatalf("unexpected cpu_percent: %+v", payload)
+	}
+	assertResourcePayloadShape(t, payload)
+	if collectedAt, ok := payload["collected_at"].(string); !ok || collectedAt != "2026-04-05T12:00:00Z" {
+		t.Fatalf("unexpected collected_at: %+v", payload)
+	}
+}
+
+func TestHandleGetResourcesReturns503WithoutCollector(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := &Server{auditLogger: newTestAuditLogger(t)}
+
+	ctx, recorder := newJSONContext(http.MethodGet, "/api/resources")
+	server.handleGetResources(ctx)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503, got %d", recorder.Code)
+	}
+	if body := recorder.Body.String(); body != `{"error":"resource metrics collector not initialized"}` {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func TestHandleGetResourcesReturns500OnCollectFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := &Server{
+		resourceCollector: fakeResourceCollector{err: errors.New("boom")},
+		auditLogger:       newTestAuditLogger(t),
+	}
+
+	ctx, recorder := newJSONContext(http.MethodGet, "/api/resources")
+	server.handleGetResources(ctx)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d", recorder.Code)
+	}
+	if body := recorder.Body.String(); body != `{"error":"failed to collect system resources"}` {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+func assertResourcePayloadShape(t *testing.T, payload map[string]any) {
+	t.Helper()
+
+	if _, ok := payload["cpu_percent"].(float64); !ok {
+		t.Fatalf("expected cpu_percent number, got %+v", payload)
+	}
+	memory, ok := payload["memory"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected memory object, got %+v", payload)
+	}
+	if _, ok := memory["total_bytes"].(float64); !ok {
+		t.Fatalf("expected total_bytes number, got %+v", memory)
+	}
+	if _, ok := payload["collected_at"].(string); !ok {
+		t.Fatalf("expected collected_at string, got %+v", payload)
 	}
 }
 

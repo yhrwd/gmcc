@@ -126,3 +126,18 @@ type CORSConfig struct {
 	Enabled bool     `yaml:"enabled"`
 	Origins []string `yaml:"origins"`
 }
+
+// ResourceMemoryView 系统内存资源展示模型
+type ResourceMemoryView struct {
+	TotalBytes     uint64  `json:"total_bytes"`
+	UsedBytes      uint64  `json:"used_bytes"`
+	AvailableBytes uint64  `json:"available_bytes"`
+	UsedPercent    float64 `json:"used_percent"`
+}
+
+// ResourceSnapshotView 系统资源快照展示模型
+type ResourceSnapshotView struct {
+	CPUPercent  float64            `json:"cpu_percent"`
+	Memory      ResourceMemoryView `json:"memory"`
+	CollectedAt time.Time          `json:"collected_at"`
+}

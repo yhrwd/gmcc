@@ -17,6 +17,7 @@ import (
 	"gmcc/internal/logx"
 	"gmcc/internal/resource"
 	"gmcc/internal/state"
+	"gmcc/internal/systemmetrics"
 	"gmcc/internal/web/audit"
 	"gmcc/internal/webtypes"
 	"gmcc/internal/webui"
@@ -24,15 +25,16 @@ import (
 
 // Server Web服务器
 type Server struct {
-	config          webtypes.WebConfig
-	configPath      string // Web配置文件路径
-	router          *gin.Engine
-	httpServer      *http.Server
-	clusterManager  *cluster.Manager
-	resourceManager accountReader
-	runtimeAuth     *authsession.AuthManager
-	auditLogger     *audit.Logger
-	uiAssets        webui.UIAssets
+	config            webtypes.WebConfig
+	configPath        string // Web配置文件路径
+	router            *gin.Engine
+	httpServer        *http.Server
+	clusterManager    *cluster.Manager
+	resourceManager   accountReader
+	runtimeAuth       *authsession.AuthManager
+	auditLogger       *audit.Logger
+	uiAssets          webui.UIAssets
+	resourceCollector systemmetrics.Collector
 }
 
 type accountReader interface {
@@ -43,7 +45,7 @@ type accountReader interface {
 }
 
 // NewServer 创建Web服务器
-func NewServer(config webtypes.WebConfig, configPath string, clusterManager *cluster.Manager, resourceManager accountReader, runtimeAuth *authsession.AuthManager) (*Server, error) {
+func NewServer(config webtypes.WebConfig, configPath string, clusterManager *cluster.Manager, resourceManager accountReader, runtimeAuth *authsession.AuthManager, resourceCollector systemmetrics.Collector) (*Server, error) {
 	// 创建审计日志管理器
 	logDir := auditLogDir(configPath)
 	auditLogger, err := audit.NewLogger(logDir, config.Auth.AuditLogRetentionDays)
@@ -55,13 +57,14 @@ func NewServer(config webtypes.WebConfig, configPath string, clusterManager *clu
 	gin.SetMode(gin.ReleaseMode)
 
 	server := &Server{
-		config:          config,
-		configPath:      configPath,
-		clusterManager:  clusterManager,
-		resourceManager: resourceManager,
-		runtimeAuth:     runtimeAuth,
-		auditLogger:     auditLogger,
-		uiAssets:        webui.NewEmbeddedAssets(),
+		config:            config,
+		configPath:        configPath,
+		clusterManager:    clusterManager,
+		resourceManager:   resourceManager,
+		runtimeAuth:       runtimeAuth,
+		auditLogger:       auditLogger,
+		uiAssets:          webui.NewEmbeddedAssets(),
+		resourceCollector: resourceCollector,
 	}
 
 	// 设置路由
@@ -98,6 +101,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/accounts/:id", s.handleGetAccount)
 		api.GET("/instances", s.handleGetInstances)
 		api.GET("/instances/:id", s.handleGetInstance)
+		api.GET("/resources", s.handleGetResources)
 
 		// 认证API
 		api.POST("/auth/microsoft/init", s.handleMicrosoftAuthInit)

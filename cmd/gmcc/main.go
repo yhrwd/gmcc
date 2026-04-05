@@ -15,6 +15,7 @@ import (
 	"gmcc/internal/logx"
 	"gmcc/internal/resource"
 	"gmcc/internal/state"
+	"gmcc/internal/systemmetrics"
 	"gmcc/internal/web"
 	"gmcc/internal/webtypes"
 )
@@ -65,7 +66,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	server, err := web.NewServer(runtime.WebConfig, configPath, runtime.ClusterManager, runtime.ResourceManager, runtime.AuthManager)
+	server, err := web.NewServer(runtime.WebConfig, configPath, runtime.ClusterManager, runtime.ResourceManager, runtime.AuthManager, systemmetrics.NewDefaultCollector())
 	if err != nil {
 		logx.Errorf("Web服务器创建失败: %v", err)
 		os.Exit(1)
