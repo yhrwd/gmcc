@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	authsession "gmcc/internal/auth/session"
 )
 
 func TestManager_StartDoesNotAutoLaunchEnabledAccounts(t *testing.T) {
@@ -111,5 +113,51 @@ func TestManager_LocalSimulationReconnectPolicy(t *testing.T) {
 
 			_ = m.Stop()
 		})
+	}
+}
+
+func TestClassifyExitCategoryRecognizesWrappedNetworkErrors(t *testing.T) {
+	tests := []error{
+		errors.New("读取数据包失败 (state=play): EOF"),
+		errors.New("连接服务器失败: connection refused"),
+		errors.New("服务器已关闭连接 (state=play): use of closed network connection"),
+	}
+
+	for _, err := range tests {
+		if got := classifyExitCategory(err); got != ExitCategoryNetworkDisconnect {
+			t.Fatalf("expected network disconnect for %v, got %s", err, got)
+		}
+	}
+}
+
+func TestManager_AuthSessionErrorsDoNotReconnect(t *testing.T) {
+	initTestLogger(t)
+
+	cfg := DefaultClusterConfig()
+	cfg.Global.ReconnectPolicy.Enabled = true
+	m := NewManager(cfg, nil)
+	if err := m.CreateInstance("a1", AccountEntry{ID: "a1", PlayerID: "p1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	inst, err := m.GetInstance("a1")
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	factory := newScriptedRunnerFactory(runnerOutcome{err: authsession.ErrDeviceLoginRequired})
+	inst.runnerFactory = factory.Build
+
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if got := inst.GetStatus(); got != StatusError {
+		t.Fatalf("expected auth failure to end in error, got %s", got)
+	}
+	m.supervisionMu.Lock()
+	hasReconnect := m.supervising[inst.ID]
+	m.supervisionMu.Unlock()
+	if hasReconnect {
+		t.Fatalf("auth failure should not trigger reconnect supervision")
 	}
 }

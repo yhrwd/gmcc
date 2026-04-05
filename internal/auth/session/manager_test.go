@@ -154,7 +154,7 @@ func TestAuthManager_DeviceLoginTransitions(t *testing.T) {
 				p.pollResults = []fakePollResult{{err: errors.New("upstream unavailable")}}
 			},
 			wantStatus:     DeviceLoginStatusFailed,
-			wantErrIs:      ErrProviderUnavailable,
+			wantErrIs:      ErrRefreshUpstream,
 			wantPollAtMost: -1,
 		},
 	}
@@ -210,8 +210,91 @@ func TestAuthManager_ProviderUnavailableNormalizesToAuthFailed(t *testing.T) {
 	mgr := NewAuthManager(newFakeTokenStore(), provider)
 
 	_, err := mgr.Refresh(context.Background(), "acc-main")
-	if !errors.Is(err, ErrProviderUnavailable) {
-		t.Fatalf("want ErrProviderUnavailable, got %v", err)
+	if !errors.Is(err, ErrRefreshUpstream) {
+		t.Fatalf("want ErrRefreshUpstream, got %v", err)
+	}
+}
+
+func TestAuthManager_GetSessionUsesValidMicrosoftAccessWithoutRefreshToken(t *testing.T) {
+	provider := newFakeProvider()
+	provider.refreshResult = fakeRefreshResult{
+		session: AuthSession{
+			AccountID:            "acc-main",
+			MinecraftAccessToken: "mc-from-access",
+			ProfileID:            "uuid",
+			ProfileName:          "Steve",
+		},
+	}
+	store := newFakeTokenStore()
+	store.caches["acc-main"] = &TokenCache{
+		AccountID: "acc-main",
+		Microsoft: MicrosoftTokenCache{
+			AccessToken: "ms-access",
+			ExpiresAt:   time.Now().Add(10 * time.Minute),
+		},
+	}
+	mgr := NewAuthManager(store, provider)
+
+	session, err := mgr.GetSession(context.Background(), "acc-main")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.MinecraftAccessToken != "mc-from-access" {
+		t.Fatalf("unexpected session token: %q", session.MinecraftAccessToken)
+	}
+	if provider.refreshCalls != 0 {
+		t.Fatalf("refresh should not be called, got %d", provider.refreshCalls)
+	}
+}
+
+func TestAuthManager_PersistsLastAuthError(t *testing.T) {
+	provider := newFakeProvider()
+	provider.refreshErr = errors.New("invalid_grant")
+	store := newFakeTokenStore()
+	mgr := NewAuthManager(store, provider)
+
+	_, err := mgr.Refresh(context.Background(), "acc-main")
+	if !errors.Is(err, ErrRefreshTokenInvalid) {
+		t.Fatalf("want ErrRefreshTokenInvalid, got %v", err)
+	}
+	cache, loadErr := store.Load("acc-main")
+	if loadErr != nil {
+		t.Fatalf("load cache: %v", loadErr)
+	}
+	if cache.LastAuthError == "" {
+		t.Fatalf("expected LastAuthError to be persisted")
+	}
+}
+
+func TestAuthManager_ClearRemovesCacheAndFlowState(t *testing.T) {
+	provider := newFakeProvider()
+	provider.deviceLoginInfo = DeviceLoginInfo{
+		AccountID:       "acc-main",
+		UserCode:        "ABCD",
+		VerificationURI: "https://microsoft.com/devicelogin",
+		ExpiresAt:       time.Now().Add(2 * time.Second),
+		PollInterval:    20 * time.Millisecond,
+	}
+	store := newFakeTokenStore()
+	store.caches["acc-main"] = &TokenCache{AccountID: "acc-main", LastAuthError: "old"}
+	mgr := NewAuthManager(store, provider)
+
+	if _, err := mgr.BeginDeviceLogin(context.Background(), "acc-main"); err != nil {
+		t.Fatalf("begin device login: %v", err)
+	}
+	if err := mgr.Clear("acc-main"); err != nil {
+		t.Fatalf("clear auth state: %v", err)
+	}
+	cache, err := store.Load("acc-main")
+	if err != nil {
+		t.Fatalf("load cache after clear: %v", err)
+	}
+	if cache.LastAuthError != "" || cache.AccountID != "acc-main" {
+		t.Fatalf("expected empty cache after clear, got %+v", cache)
+	}
+	status, _, statusErr := mgr.GetDeviceLoginStatus("acc-main")
+	if status != DeviceLoginStatusFailed || !errors.Is(statusErr, ErrDeviceLoginRequired) {
+		t.Fatalf("expected cleared device flow state, got status=%s err=%v", status, statusErr)
 	}
 }
 
@@ -244,6 +327,13 @@ func (f *fakeTokenStore) Save(accountID string, cache *TokenCache) error {
 	defer f.mu.Unlock()
 	copy := *cache
 	f.caches[accountID] = &copy
+	return nil
+}
+
+func (f *fakeTokenStore) Delete(accountID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.caches, accountID)
 	return nil
 }
 

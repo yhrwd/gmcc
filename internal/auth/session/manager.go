@@ -14,6 +14,7 @@ import (
 type tokenStore interface {
 	Load(accountID string) (*TokenCache, error)
 	Save(accountID string, cache *TokenCache) error
+	Delete(accountID string) error
 }
 
 type authProvider interface {
@@ -62,8 +63,11 @@ func (m *AuthManager) GetSession(ctx context.Context, accountID string) (AuthSes
 	if cache.HasValidMinecraftToken(now) {
 		return cache.ToAuthSession(AuthSourceCache), nil
 	}
+	if cache.HasValidMicrosoftAccess(now) {
+		return m.completeSessionFromMicrosoft(ctx, strings.TrimSpace(accountID), cache.Microsoft, AuthSourceRefresh)
+	}
 	if !cache.HasMicrosoftRefreshToken() {
-		return AuthSession{}, ErrDeviceLoginRequired
+		return AuthSession{}, m.persistAuthFailure(accountID, cache, ErrDeviceLoginRequired)
 	}
 
 	return m.singleFlightRefresh(ctx, strings.TrimSpace(accountID), cache)
@@ -75,9 +79,29 @@ func (m *AuthManager) Refresh(ctx context.Context, accountID string) (AuthSessio
 		return AuthSession{}, err
 	}
 	if !cache.HasMicrosoftRefreshToken() {
-		return AuthSession{}, ErrDeviceLoginRequired
+		return AuthSession{}, m.persistAuthFailure(accountID, cache, ErrDeviceLoginRequired)
 	}
 	return m.singleFlightRefresh(ctx, strings.TrimSpace(accountID), cache)
+}
+
+func (m *AuthManager) Clear(accountID string) error {
+	trimmedAccountID := strings.TrimSpace(accountID)
+
+	m.mu.Lock()
+	if flow, ok := m.device[trimmedAccountID]; ok {
+		if flow.cancel != nil {
+			flow.cancel()
+		}
+		delete(m.device, trimmedAccountID)
+	}
+	if pending, ok := m.inflight[trimmedAccountID]; ok {
+		pending.err = ErrDeviceLoginRequired
+		close(pending.done)
+		delete(m.inflight, trimmedAccountID)
+	}
+	m.mu.Unlock()
+
+	return m.store.Delete(trimmedAccountID)
 }
 
 func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
@@ -125,7 +149,8 @@ func (m *AuthManager) singleFlightRefresh(ctx context.Context, accountID string,
 func (m *AuthManager) refreshSession(ctx context.Context, accountID string, cache *TokenCache) (AuthSession, error) {
 	msCache, err := m.provider.RefreshMicrosoft(ctx, cache.Microsoft.RefreshToken)
 	if err != nil {
-		return AuthSession{}, normalizeProviderError(err)
+		normalized := normalizeProviderError(err)
+		return AuthSession{}, m.persistAuthFailure(accountID, cache, normalized)
 	}
 
 	return m.completeSessionFromMicrosoft(ctx, accountID, msCache, AuthSourceRefresh)
@@ -135,30 +160,35 @@ func (m *AuthManager) completeSessionFromMicrosoft(ctx context.Context, accountI
 
 	xsts, err := m.provider.GetXSTSFromMicrosoft(ctx, msCache.AccessToken)
 	if err != nil {
-		return AuthSession{}, normalizeProviderError(err)
+		normalized := normalizeProviderError(err)
+		return AuthSession{}, m.persistAuthFailure(accountID, nil, normalized)
 	}
 
 	mcCache, err := m.provider.ExchangeMinecraftToken(ctx, xsts)
 	if err != nil {
-		return AuthSession{}, normalizeProviderError(err)
+		normalized := normalizeProviderError(err)
+		return AuthSession{}, m.persistAuthFailure(accountID, nil, normalized)
 	}
 
 	if err := m.provider.VerifyOwnership(ctx, mcCache.AccessToken); err != nil {
-		return AuthSession{}, normalizeProviderError(err)
+		normalized := normalizeProviderError(err)
+		return AuthSession{}, m.persistAuthFailure(accountID, nil, normalized)
 	}
 
 	profile, err := m.provider.GetProfile(ctx, mcCache.AccessToken)
 	if err != nil {
-		return AuthSession{}, normalizeProviderError(err)
+		normalized := normalizeProviderError(err)
+		return AuthSession{}, m.persistAuthFailure(accountID, nil, normalized)
 	}
 	if strings.TrimSpace(profile.ID) == "" || strings.TrimSpace(profile.Name) == "" {
-		return AuthSession{}, ErrProfileInvalid
+		return AuthSession{}, m.persistAuthFailure(accountID, nil, ErrProfileInvalid)
 	}
 	mcCache.ProfileID = strings.TrimSpace(profile.ID)
 	mcCache.ProfileName = strings.TrimSpace(profile.Name)
 
 	next := &TokenCache{
 		AccountID: strings.TrimSpace(accountID),
+		UpdatedAt: time.Now().UTC(),
 		Microsoft: msCache,
 		Minecraft: mcCache,
 	}
@@ -363,6 +393,8 @@ func normalizeProviderError(err error) error {
 	switch {
 	case strings.Contains(msg, "refresh_token"), strings.Contains(msg, "refresh token"), strings.Contains(msg, "invalid_grant"):
 		return ErrRefreshTokenInvalid
+	case strings.Contains(msg, "temporarily unavailable"), strings.Contains(msg, "upstream unavailable"), strings.Contains(msg, "timeout"), strings.Contains(msg, "context deadline"):
+		return ErrRefreshUpstream
 	case strings.Contains(msg, "ownership"), strings.Contains(msg, "entitlement"):
 		return ErrOwnershipFailed
 	case strings.Contains(msg, "profile"):
@@ -372,4 +404,22 @@ func normalizeProviderError(err error) error {
 	default:
 		return ErrProviderUnavailable
 	}
+}
+
+func (m *AuthManager) persistAuthFailure(accountID string, base *TokenCache, authErr error) error {
+	if authErr == nil {
+		return nil
+	}
+	cache := NewTokenCache(accountID)
+	if base != nil {
+		copy := *base
+		cache = &copy
+	}
+	cache.AccountID = strings.TrimSpace(accountID)
+	cache.LastAuthError = authErr.Error()
+	cache.UpdatedAt = time.Now().UTC()
+	if saveErr := m.store.Save(accountID, cache); saveErr != nil {
+		return fmt.Errorf("persist auth failure: %w", saveErr)
+	}
+	return authErr
 }
