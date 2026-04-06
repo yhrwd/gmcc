@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -77,6 +79,76 @@ func TestPrepareEmbedDirCopiesOnlyWhitelistedFiles(t *testing.T) {
 	}
 }
 
+func TestPrepareEmbedDirCopiesViteStyleFrontendAssets(t *testing.T) {
+	tmp := t.TempDir()
+	frontendDist := filepath.Join(tmp, "frontend-dist")
+	embedDir := filepath.Join(tmp, "embed")
+
+	files := map[string]string{
+		"index.html": `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <script type="module" crossorigin src="/assets/index-m3WTdUe_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BIKtDdUB.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>
+`,
+		filepath.Join("assets", "index-m3WTdUe_.js"):     "console.log('vite js');",
+		filepath.Join("assets", "index-BIKtDdUB.css"):    "body{background:#020617;}",
+		"manifest.webmanifest":                           "{}",
+		"robots.txt":                                     "User-agent: *\nAllow: /\n",
+		filepath.Join("assets", "index-m3WTdUe_.js.map"): "{}",
+		filepath.Join("assets", ".hidden.js"):            "console.log('hidden');",
+		"vite.svg":                                       `<svg xmlns="http://www.w3.org/2000/svg"></svg>`,
+	}
+
+	for rel, content := range files {
+		path := filepath.Join(frontendDist, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prepared, err := prepareEmbedDir(frontendDist, embedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared {
+		t.Fatal("expected prepared to be true")
+	}
+
+	wantExists := []string{
+		"index.html",
+		filepath.Join("assets", "index-m3WTdUe_.js"),
+		filepath.Join("assets", "index-BIKtDdUB.css"),
+		"manifest.webmanifest",
+		"robots.txt",
+	}
+	for _, rel := range wantExists {
+		if _, err := os.Stat(filepath.Join(embedDir, rel)); err != nil {
+			t.Fatalf("expected %s to exist: %v", rel, err)
+		}
+	}
+
+	wantMissing := []string{
+		filepath.Join("assets", "index-m3WTdUe_.js.map"),
+		filepath.Join("assets", ".hidden.js"),
+		"vite.svg",
+	}
+	for _, rel := range wantMissing {
+		if _, err := os.Stat(filepath.Join(embedDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be absent, got %v", rel, err)
+		}
+	}
+}
+
 func TestPrepareEmbedDirWithoutIndexFallsBackToAPIOnly(t *testing.T) {
 	tmp := t.TempDir()
 	frontendDist := filepath.Join(tmp, "frontend-dist")
@@ -100,5 +172,63 @@ func TestPrepareEmbedDirWithoutIndexFallsBackToAPIOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(embedDir, "assets", "app.js")); !os.IsNotExist(err) {
 		t.Fatalf("expected copied assets to be cleared when index.html is missing, got %v", err)
+	}
+}
+
+func TestBuildFrontendIfPresentReturnsFalseWhenProjectMissing(t *testing.T) {
+	tmp := t.TempDir()
+
+	built, err := buildFrontendIfPresent(filepath.Join(tmp, "missing-frontend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built {
+		t.Fatal("expected built to be false")
+	}
+}
+
+func TestBuildFrontendIfPresentRunsNpmBuildScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("script execution test is POSIX-only")
+	}
+
+	tmp := t.TempDir()
+	frontendDir := filepath.Join(tmp, "frontend")
+	binDir := filepath.Join(tmp, "bin")
+	markerPath := filepath.Join(tmp, "npm-build-marker.txt")
+
+	if err := os.MkdirAll(frontendDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(frontendDir, "package.json"), []byte(`{"name":"test-frontend"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	npmPath := filepath.Join(binDir, "npm")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"$@\" > %q\n", markerPath)
+	if err := os.WriteFile(npmPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	originalPath := os.Getenv("PATH")
+	t.Setenv("PATH", fmt.Sprintf("%s%c%s", binDir, os.PathListSeparator, originalPath))
+
+	built, err := buildFrontendIfPresent(frontendDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !built {
+		t.Fatal("expected built to be true")
+	}
+
+	marker, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(marker), "runbuild"; got != want {
+		t.Fatalf("expected npm args %q, got %q", want, got)
 	}
 }

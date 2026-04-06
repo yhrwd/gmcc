@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+const frontendBuildScript = "build"
+
 var rootWhitelist = map[string]struct{}{
 	"index.html":           {},
 	"favicon.ico":          {},
@@ -22,9 +24,21 @@ var rootWhitelist = map[string]struct{}{
 
 func main() {
 	frontendDist := flag.String("frontend-dist", filepath.Join("frontend", "dist"), "frontend dist input")
+	frontendDir := flag.String("frontend-dir", "frontend", "frontend project directory")
 	embedDist := flag.String("embed-dist", filepath.Join("internal", "webui", "dist"), "embed dist output")
 	output := flag.String("output", defaultOutputPath(), "binary output path")
 	flag.Parse()
+
+	frontendBuilt, err := buildFrontendIfPresent(*frontendDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build frontend: %v\n", err)
+		os.Exit(1)
+	}
+	if frontendBuilt {
+		fmt.Printf("frontend build complete: %s\n", *frontendDir)
+	} else {
+		fmt.Println("frontend project unavailable; using existing dist if present")
+	}
 
 	prepared, err := prepareEmbedDir(*frontendDist, *embedDist)
 	if err != nil {
@@ -42,6 +56,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "build binary: %v\n", err)
 		os.Exit(1)
 	}
+
+	fmt.Printf("binary written to %s\n", *output)
 }
 
 func defaultOutputPath() string {
@@ -207,14 +223,47 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
+func buildFrontendIfPresent(frontendDir string) (bool, error) {
+	packageJSONPath := filepath.Join(frontendDir, "package.json")
+	if _, err := os.Stat(packageJSONPath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if err := runCommand(frontendDir, npmCommandArgs(frontendBuildScript)...); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func npmCommandArgs(script string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"npm.cmd", "run", script}
+	}
+
+	return []string{"npm", "run", script}
+}
+
+func runCommand(dir string, args ...string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing command")
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
 func buildBinary(output string) error {
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("go", "build", "-o", output, "./cmd/gmcc")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return runCommand("", "go", "build", "-o", output, "./cmd/gmcc")
 }

@@ -94,7 +94,7 @@ gmcc/
 
 ### `internal/web`
 
-负责 Gin API 路由，不提供静态前端页面。
+负责 Gin API 路由；当前服务以 API 为主，但如果存在嵌入式前端资源，也会对非 `/api` 路径提供静态资源或入口页回退。
 
 ## 4. 配置参考
 
@@ -243,6 +243,8 @@ log:
 
 说明：`uptime` 是 Go `time.Duration` 的 JSON 表现，当前为纳秒数值。
 
+补充：`GET /api/accounts/:id` 与 `GET /api/instances/:id` 都是直接返回单个对象，而不是 `{ "account": ... }` 或 `{ "instance": ... }` 结构。
+
 ## 8. 实例状态参考
 
 | 值 | 含义 |
@@ -256,7 +258,7 @@ log:
 
 ## 9. 审计日志
 
-审计日志通过 `GET /api/logs/operations` 读取，磁盘上按天写入运行时基目录下的 `logs/audit/YYYY-MM-DD.jsonl`；运行时基目录默认取 `configPath` 所在目录。
+审计日志通过 `GET /api/logs/operations` 读取，磁盘上按天写入 `logs/audit/YYYY-MM-DD.jsonl`；若通过 `GMCC_CONFIG` 指定配置文件，则日志目录以该配置文件所在目录为基准，否则相对当前工作目录解析。
 
 常见 `action`：
 

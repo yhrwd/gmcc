@@ -144,6 +144,11 @@ log:
 5. 使用实例控制接口启动、停止或重启实例
 6. 使用 `GET /api/status`、`GET /api/instances`、`GET /api/logs/operations` 更新面板数据
 
+前端约束：
+
+- 当前内置 Vue 控制台与后端同源协作，所有请求都应使用 `/api` 下的相对路径，不要在生产构建里写死独立 API 域名。
+- Microsoft 设备码登录第一版只支持单会话模型：同一时刻只维护一个活跃的设备码会话，新的发起动作应视为替换上一轮会话。
+
 ## 可选内嵌前端工作流
 
 - 默认直接执行 `go build -o gmcc.exe ./cmd/gmcc` 时，gmcc 会以 API-only 方式构建；仓库内只保留 `internal/webui/dist/.keep` 占位文件，不会默认内嵌任何前端资源。
@@ -157,6 +162,61 @@ log:
 ```bash
 go run ./tools/packager
 ```
+
+### 前端开发与构建
+
+前端工程位于 `frontend/`，基于 Vite + Vue 3 + TypeScript。
+
+开发模式：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+默认 Vite 开发服务器运行在 `http://localhost:5173`。仓库示例配置已经为该地址放开 CORS，便于本地联调后端 `http://localhost:8080`。
+
+前端测试与构建：
+
+```bash
+cd frontend
+npm run test
+npm run build
+```
+
+`npm run build` 会输出 Vite 风格产物到 `frontend/dist/`，通常包括：
+
+- 根目录 `index.html`
+- `assets/` 下带内容哈希的 JS / CSS 等静态资源
+- 可选白名单根文件，如 `favicon.ico`、`favicon.svg`、`manifest.webmanifest`、`robots.txt`
+
+### Packager 用法
+
+当你希望把前端一起嵌入 gmcc 二进制时，在仓库根目录执行：
+
+```bash
+go run ./tools/packager
+```
+
+常见工作流：
+
+```bash
+cd frontend
+npm run build
+
+cd ..
+go run ./tools/packager
+```
+
+packager 默认读取 `frontend/dist/`，筛选可嵌入文件后复制到 `internal/webui/dist/`，再执行 `go build` 产出 `build/gmcc.exe`（非 Windows 为 `build/gmcc`）。
+
+当前 whitelist 规则为：
+
+- 根目录只允许 `index.html`、`favicon.ico`、`favicon.svg`、`manifest.webmanifest`、`robots.txt`
+- `assets/` 目录允许普通静态资源，包括 Vite 默认生成的哈希文件名
+- 隐藏文件、隐藏目录以及 `.map` sourcemap 文件不会进入内嵌目录
+- 如果最终没有得到 `index.html`，packager 会回退到 API-only 构建
 
 运行时行为：
 
