@@ -6,7 +6,7 @@ export type AccountStatusTone = 'ready' | 'pending' | 'disabled' | 'invalid' | '
 export type InstanceStatusTone = 'pending' | 'starting' | 'running' | 'reconnecting' | 'stopped' | 'error' | 'unknown'
 export type ComfortLevel = 'comfort' | 'busy' | 'tense' | 'quiet'
 export type ToastTone = 'success' | 'error'
-export type LoginTaskStatus = 'idle' | 'initializing' | 'polling' | 'succeeded' | 'failed' | 'expired' | 'replaced'
+export type LoginTaskStatus = 'idle' | 'initializing' | 'polling' | 'succeeded' | 'failed' | 'expired' | 'cancelled' | 'replaced'
 export type AccountAuthStatus = 'logged_in' | 'not_logged_in' | 'auth_invalid' | 'unknown'
 
 export type ViewStatusSummary = {

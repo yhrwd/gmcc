@@ -15,7 +15,7 @@ const now = ref(Date.now())
 
 const tone = computed(() => {
   if (loginTask.value.taskStatus === 'succeeded') return 'success'
-  if (loginTask.value.taskStatus === 'failed' || loginTask.value.taskStatus === 'expired' || loginTask.value.taskStatus === 'replaced') return 'error'
+  if (loginTask.value.taskStatus === 'failed' || loginTask.value.taskStatus === 'expired' || loginTask.value.taskStatus === 'cancelled' || loginTask.value.taskStatus === 'replaced') return 'error'
   if (loginTask.value.taskStatus === 'polling' || loginTask.value.taskStatus === 'initializing') return 'pending'
   return 'unknown'
 })
@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
     <div class="login-panel__actions">
       <a v-if="verificationLink" class="login-panel__primary" :href="verificationLink" target="_blank" rel="noreferrer">打开验证页</a>
       <button
-        v-if="loginTask.taskStatus === 'failed' || loginTask.taskStatus === 'expired'"
+        v-if="loginTask.taskStatus === 'failed' || loginTask.taskStatus === 'expired' || loginTask.taskStatus === 'cancelled'"
         type="button"
         class="login-panel__ghost"
         @click="accountsStore.startLogin(loginTask.accountId)"
@@ -201,6 +201,12 @@ onBeforeUnmount(() => {
   padding: 0.72rem 1rem;
   text-decoration: none;
   cursor: pointer;
+}
+
+.login-panel__ghost:focus-visible,
+.login-panel__primary:focus-visible {
+  outline: 3px solid rgba(72, 122, 170, 0.32);
+  outline-offset: 2px;
 }
 
 .login-panel__ghost {

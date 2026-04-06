@@ -49,4 +49,18 @@ describe('microsoft login task', () => {
     expect(ui.loginTask.expiresAt).toBeNull()
     apiClient.initMicrosoftLogin = originalInitMicrosoftLogin
   })
+
+  it('keeps cancelled status distinct from failed status', async () => {
+    setActivePinia(createPinia())
+    const ui = useUiStore()
+    const accounts = useAccountsStore()
+    ui.setLoginTaskPayload({ accountId: 'acc-main', taskStatus: 'polling', panelOpen: true })
+    const originalPollMicrosoftLogin = apiClient.pollMicrosoftLogin
+    apiClient.pollMicrosoftLogin = async () => ({ success: false, status: 'cancelled', message: 'Device login cancelled' })
+
+    await accounts.pollLogin()
+
+    expect(ui.loginTask.taskStatus).toBe('cancelled')
+    apiClient.pollMicrosoftLogin = originalPollMicrosoftLogin
+  })
 })

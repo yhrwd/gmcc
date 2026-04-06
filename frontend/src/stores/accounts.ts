@@ -156,7 +156,7 @@ export const useAccountsStore = defineStore('accounts', {
         }
 
         if (status === 'cancelled') {
-          ui.setLoginTaskPayload({ taskStatus: 'failed', lastMessage: result.message || '登录流程已取消' })
+          ui.setLoginTaskPayload({ taskStatus: 'cancelled', lastMessage: result.message || '登录流程已取消' })
           return
         }
 

@@ -7,7 +7,7 @@ const { toasts } = storeToRefs(uiStore)
 </script>
 
 <template>
-  <div class="toast-host">
+  <div class="toast-host" aria-live="polite">
     <transition-group name="toast-list">
       <div v-for="toast in toasts" :key="toast.id" class="toast-item" :data-tone="toast.tone">
         <span>{{ toast.message }}</span>
@@ -55,9 +55,14 @@ const { toasts } = storeToRefs(uiStore)
   cursor: pointer;
 }
 
+.toast-item__button:focus-visible {
+  outline: 3px solid rgba(72, 122, 170, 0.3);
+  outline-offset: 2px;
+}
+
 .toast-list-enter-active,
 .toast-list-leave-active {
-  transition: all 0.24s ease;
+  transition: opacity 0.24s ease, transform 0.24s ease;
 }
 
 .toast-list-enter-from,
