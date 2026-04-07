@@ -58,6 +58,7 @@ export const useLogsStore = defineStore('logs', {
       } catch (error) {
         this.state = 'error'
         this.errorMessage = error instanceof Error ? error.message : '日志读取失败'
+        throw error
       }
     },
     async loadFilteredLogs(force = false, silent = false) {
@@ -81,6 +82,7 @@ export const useLogsStore = defineStore('logs', {
       } catch (error) {
         this.filteredState = 'error'
         this.filteredErrorMessage = error instanceof Error ? error.message : '筛选日志读取失败'
+        throw error
       }
     },
     async applyDateFilter(range: { start: string; end: string }) {

@@ -9,10 +9,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
 const frontendBuildScript = "build"
+
+type buildTarget struct {
+	GOOS   string
+	GOARCH string
+}
+
+var defaultBuildTargets = []buildTarget{
+	{GOOS: "linux", GOARCH: "amd64"},
+	{GOOS: "linux", GOARCH: "arm64"},
+	{GOOS: "windows", GOARCH: "amd64"},
+	{GOOS: "windows", GOARCH: "arm64"},
+	{GOOS: "darwin", GOARCH: "amd64"},
+	{GOOS: "darwin", GOARCH: "arm64"},
+}
 
 var rootWhitelist = map[string]struct{}{
 	"index.html":           {},
@@ -26,8 +41,17 @@ func main() {
 	frontendDist := flag.String("frontend-dist", filepath.Join("frontend", "dist"), "frontend dist input")
 	frontendDir := flag.String("frontend-dir", "frontend", "frontend project directory")
 	embedDist := flag.String("embed-dist", filepath.Join("internal", "webui", "dist"), "embed dist output")
-	output := flag.String("output", defaultOutputPath(), "binary output path")
+	output := flag.String("output", "", "single binary output path (legacy mode)")
+	outputDir := flag.String("output-dir", "build", "binary output directory")
+	targetsFlag := flag.String("targets", "", "comma-separated os/arch targets, such as linux/amd64,darwin/arm64")
+	version := flag.String("version", "", "version injected into main.Version")
 	flag.Parse()
+
+	targets, err := resolveBuildTargets(*targetsFlag, *output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve build targets: %v\n", err)
+		os.Exit(1)
+	}
 
 	frontendBuilt, err := buildFrontendIfPresent(*frontendDir)
 	if err != nil {
@@ -52,12 +76,24 @@ func main() {
 		fmt.Println("frontend assets unavailable; building API-only binary")
 	}
 
-	if err := buildBinary(*output); err != nil {
-		fmt.Fprintf(os.Stderr, "build binary: %v\n", err)
+	if *output != "" {
+		if err := buildBinary(*output, targets[0], *version); err != nil {
+			fmt.Fprintf(os.Stderr, "build binary: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("binary written to %s\n", *output)
+		return
+	}
+
+	outputs, err := buildBinaries(*outputDir, targets, *version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build binaries: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("binary written to %s\n", *output)
+	for _, outputPath := range outputs {
+		fmt.Printf("binary written to %s\n", outputPath)
+	}
 }
 
 func defaultOutputPath() string {
@@ -66,6 +102,88 @@ func defaultOutputPath() string {
 	}
 
 	return filepath.Join("build", "gmcc")
+}
+
+func defaultTargetsFlagValue() string {
+	parts := make([]string, 0, len(defaultBuildTargets))
+	for _, target := range defaultBuildTargets {
+		parts = append(parts, target.String())
+	}
+	return strings.Join(parts, ",")
+}
+
+func resolveBuildTargets(targetsFlag, output string) ([]buildTarget, error) {
+	if output != "" {
+		if strings.TrimSpace(targetsFlag) == "" {
+			return []buildTarget{{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}, nil
+		}
+
+		targets, err := parseBuildTargets(targetsFlag)
+		if err != nil {
+			return nil, err
+		}
+		if len(targets) != 1 {
+			return nil, fmt.Errorf("-output requires exactly one target, got %d", len(targets))
+		}
+		return targets, nil
+	}
+
+	if strings.TrimSpace(targetsFlag) == "" {
+		return append([]buildTarget(nil), defaultBuildTargets...), nil
+	}
+
+	return parseBuildTargets(targetsFlag)
+}
+
+func parseBuildTargets(value string) ([]buildTarget, error) {
+	parts := strings.Split(value, ",")
+	seen := make(map[string]struct{}, len(parts))
+	targets := make([]buildTarget, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		segments := strings.Split(part, "/")
+		if len(segments) != 2 {
+			return nil, fmt.Errorf("invalid target %q, want os/arch", part)
+		}
+
+		target := buildTarget{
+			GOOS:   strings.TrimSpace(segments[0]),
+			GOARCH: strings.TrimSpace(segments[1]),
+		}
+		if target.GOOS == "" || target.GOARCH == "" {
+			return nil, fmt.Errorf("invalid target %q, want os/arch", part)
+		}
+
+		key := target.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, target)
+	}
+
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no build targets configured")
+	}
+
+	return targets, nil
+}
+
+func (t buildTarget) String() string {
+	return t.GOOS + "/" + t.GOARCH
+}
+
+func (t buildTarget) outputName() string {
+	name := fmt.Sprintf("gmcc-%s-%s", t.GOOS, t.GOARCH)
+	if t.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 func prepareEmbedDir(frontendDist, embedDir string) (bool, error) {
@@ -248,6 +366,10 @@ func npmCommandArgs(script string) []string {
 }
 
 func runCommand(dir string, args ...string) error {
+	return runCommandWithEnv(dir, nil, args...)
+}
+
+func runCommandWithEnv(dir string, env []string, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command")
 	}
@@ -256,14 +378,46 @@ func runCommand(dir string, args ...string) error {
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	return cmd.Run()
 }
 
-func buildBinary(output string) error {
+func buildBinary(output string, target buildTarget, version string) error {
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
 
-	return runCommand("", "go", "build", "-o", output, "./cmd/gmcc")
+	args := []string{"go", "build"}
+	if version != "" {
+		args = append(args, "-ldflags", fmt.Sprintf("-s -w -X main.Version=%s", version))
+	}
+	args = append(args, "-o", output, "./cmd/gmcc")
+
+	env := []string{
+		"GOOS=" + target.GOOS,
+		"GOARCH=" + target.GOARCH,
+	}
+
+	return runCommandWithEnv("", env, args...)
+}
+
+func buildBinaries(outputDir string, targets []buildTarget, version string) ([]string, error) {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	outputs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		outputPath := filepath.Join(outputDir, target.outputName())
+		if err := buildBinary(outputPath, target, version); err != nil {
+			return nil, fmt.Errorf("build %s: %w", target.String(), err)
+		}
+		outputs = append(outputs, outputPath)
+	}
+
+	sort.Strings(outputs)
+	return outputs, nil
 }

@@ -37,6 +37,7 @@ export const useHomeStore = defineStore('home', {
       } catch (error) {
         this.statusState = 'error'
         this.statusError = error instanceof Error ? error.message : '状态获取失败'
+        throw error
       }
     },
     async loadResources(force = false, silent = false) {
@@ -54,13 +55,18 @@ export const useHomeStore = defineStore('home', {
       } catch (error) {
         this.resourcesState = 'error'
         this.resourcesError = error instanceof Error ? error.message : '资源获取失败'
+        throw error
       }
     },
     async loadHome(force = false, silent = false) {
-      await Promise.allSettled([
+      const results = await Promise.allSettled([
         this.loadStatus(force, silent),
         this.loadResources(force, silent),
       ])
+      const firstRejected = results.find((result) => result.status === 'rejected')
+      if (firstRejected) {
+        throw firstRejected.reason
+      }
     },
     async retryModule(module: 'status' | 'resources') {
       if (module === 'status') return this.loadStatus()

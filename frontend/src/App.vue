@@ -6,6 +6,7 @@ import HomeView from '@/components/home/HomeView.vue'
 import InstancesView from '@/components/instances/InstancesView.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import LogsView from '@/components/logs/LogsView.vue'
+import { syncCoordinator } from '@/lib/sync'
 import { useAccountsStore } from '@/stores/accounts'
 import { useHomeStore } from '@/stores/home'
 import { useInstancesStore } from '@/stores/instances'
@@ -19,7 +20,7 @@ const instancesStore = useInstancesStore()
 const logsStore = useLogsStore()
 
 const { activeView } = storeToRefs(uiStore)
-const { statusSummary, resourceSnapshot } = storeToRefs(homeStore)
+const { statusSummary } = storeToRefs(homeStore)
 
 const currentView = computed(() => {
   if (activeView.value === 'accounts') return AccountsView
@@ -28,31 +29,16 @@ const currentView = computed(() => {
   return HomeView
 })
 
-let fastRefreshId: number | null = null
-let slowRefreshId: number | null = null
-
 onMounted(() => {
-  void Promise.all([
-    homeStore.loadHome(),
-    accountsStore.loadAccounts(),
-    instancesStore.loadInstances(),
-    logsStore.loadLogs(),
-  ])
-
-  fastRefreshId = window.setInterval(() => {
-    void homeStore.loadHome(true, true)
-    void accountsStore.loadAccounts(true, true)
-    void instancesStore.loadInstances(true, true)
-  }, 8000)
-
-  slowRefreshId = window.setInterval(() => {
-    void logsStore.refreshLogs()
-  }, 20000)
+  syncCoordinator.register('overview', () => homeStore.loadHome(true, true))
+  syncCoordinator.register('accounts', () => accountsStore.loadAccounts(true, true))
+  syncCoordinator.register('instances', () => instancesStore.loadInstances(true, true))
+  syncCoordinator.register('logs', () => logsStore.refreshLogs())
+  syncCoordinator.start(['overview', 'accounts', 'instances', 'logs'])
 })
 
 onBeforeUnmount(() => {
-  if (fastRefreshId !== null) window.clearInterval(fastRefreshId)
-  if (slowRefreshId !== null) window.clearInterval(slowRefreshId)
+  syncCoordinator.stop()
 })
 </script>
 

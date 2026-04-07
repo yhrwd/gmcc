@@ -4,9 +4,68 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
+
+func TestDefaultTargetsFlagValueIncludesAllDefaultTargets(t *testing.T) {
+	got := defaultTargetsFlagValue()
+	want := "linux/amd64,linux/arm64,windows/amd64,windows/arm64,darwin/amd64,darwin/arm64"
+	if got != want {
+		t.Fatalf("want targets %q, got %q", want, got)
+	}
+}
+
+func TestParseBuildTargetsDeduplicatesAndTrims(t *testing.T) {
+	targets, err := parseBuildTargets(" linux/amd64 , windows/arm64,linux/amd64 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []buildTarget{
+		{GOOS: "linux", GOARCH: "amd64"},
+		{GOOS: "windows", GOARCH: "arm64"},
+	}
+	if !reflect.DeepEqual(targets, want) {
+		t.Fatalf("want targets %#v, got %#v", want, targets)
+	}
+}
+
+func TestParseBuildTargetsRejectsInvalidValue(t *testing.T) {
+	if _, err := parseBuildTargets("linux-amd64"); err == nil {
+		t.Fatal("expected invalid target error")
+	}
+}
+
+func TestResolveBuildTargetsForLegacyOutputRequiresSingleTarget(t *testing.T) {
+	_, err := resolveBuildTargets("linux/amd64,windows/amd64", filepath.Join("build", "gmcc.exe"))
+	if err == nil {
+		t.Fatal("expected single-target validation error")
+	}
+}
+
+func TestResolveBuildTargetsDefaultsToCurrentTargetForLegacyOutput(t *testing.T) {
+	targets, err := resolveBuildTargets("", filepath.Join("build", "gmcc.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []buildTarget{{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
+	if !reflect.DeepEqual(targets, want) {
+		t.Fatalf("want targets %#v, got %#v", want, targets)
+	}
+}
+
+func TestBuildTargetOutputNameUsesExeForWindows(t *testing.T) {
+	if got, want := (buildTarget{GOOS: "windows", GOARCH: "amd64"}).outputName(), "gmcc-windows-amd64.exe"; got != want {
+		t.Fatalf("want output name %q, got %q", want, got)
+	}
+
+	if got, want := (buildTarget{GOOS: "linux", GOARCH: "arm64"}).outputName(), "gmcc-linux-arm64"; got != want {
+		t.Fatalf("want output name %q, got %q", want, got)
+	}
+}
 
 func TestPrepareEmbedDirWithoutFrontendDistKeepsOnlyKeepFile(t *testing.T) {
 	tmp := t.TempDir()

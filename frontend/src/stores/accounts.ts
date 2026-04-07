@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { apiClient } from '@/api/client'
 import { mapAccount } from '@/lib/mappers'
+import { syncCoordinator } from '@/lib/sync'
 import { useUiStore } from '@/stores/ui'
 import type { CreateAccountPayload } from '@/types/api'
 import type { LoadState, ViewAccount } from '@/types/view'
@@ -71,7 +72,7 @@ export const useAccountsStore = defineStore('accounts', {
           ...this.items.filter((item) => item.id !== payload.id.trim()),
         ]
         this.state = 'success'
-        void this.loadAccounts(true, true)
+        syncCoordinator.requestNow(['accounts'], 'account-created')
         ui.notify('success', '新的冒险者已经入驻基地')
         return { valid: true, message: '' }
       } catch (error) {
@@ -146,7 +147,7 @@ export const useAccountsStore = defineStore('accounts', {
             lastMessage: result.message || '登录成功',
           })
           ui.notify('success', '账号已经成功醒来')
-          void this.loadAccounts(true, true)
+          syncCoordinator.requestNow(['accounts', 'overview'], 'account-login-succeeded')
           return
         }
 
@@ -190,7 +191,7 @@ export const useAccountsStore = defineStore('accounts', {
         await apiClient.deleteAccount(id)
         this.items = this.items.filter((item) => item.id !== id)
         this.state = 'success'
-        void this.loadAccounts(true, true)
+        syncCoordinator.requestNow(['accounts', 'instances', 'overview'], 'account-deleted')
         ui.notify('success', `账号 ${id} 已从基地名册移除`)
       } catch (error) {
         ui.notify('error', error instanceof Error ? error.message : '删除账号失败')

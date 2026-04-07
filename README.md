@@ -153,7 +153,7 @@ log:
 
 - 默认直接执行 `go build -o gmcc.exe ./cmd/gmcc` 时，gmcc 会以 API-only 方式构建；仓库内只保留 `internal/webui/dist/.keep` 占位文件，不会默认内嵌任何前端资源。
 - 如果存在已构建好的前端产物，可先放到 `frontend/dist/`，再运行打包工具把允许内嵌的资源复制到 `internal/webui/dist/` 并完成最终构建。
-- 打包工具入口为 `go run ./tools/packager`，默认会读取 `frontend/dist`，生成 `build/gmcc.exe`（非 Windows 为 `build/gmcc`）。
+- 打包工具入口为 `go run ./tools/packager`，默认会读取 `frontend/dist`，并在 `build/` 下生成 Linux / Windows / macOS 的多架构交叉编译产物。
 - 允许进入内嵌目录的文件目前包括根目录下的 `index.html`、`favicon.ico`、`favicon.svg`、`manifest.webmanifest`、`robots.txt`，以及 `assets/` 下的非隐藏资源文件；`.map` 文件和隐藏文件/目录会被忽略。
 - 如果 `frontend/dist` 不存在，或过滤后没有得到 `index.html`，打包工具会清理 `internal/webui/dist/` 回到仅保留 `.keep`，并继续产出 API-only 二进制。
 
@@ -209,7 +209,28 @@ cd ..
 go run ./tools/packager
 ```
 
-packager 默认读取 `frontend/dist/`，筛选可嵌入文件后复制到 `internal/webui/dist/`，再执行 `go build` 产出 `build/gmcc.exe`（非 Windows 为 `build/gmcc`）。
+packager 默认读取 `frontend/dist/`，筛选可嵌入文件后复制到 `internal/webui/dist/`，再执行交叉编译并输出到 `build/`。
+
+默认产物包括：
+
+- `build/gmcc-linux-amd64`
+- `build/gmcc-linux-arm64`
+- `build/gmcc-windows-amd64.exe`
+- `build/gmcc-windows-arm64.exe`
+- `build/gmcc-darwin-amd64`
+- `build/gmcc-darwin-arm64`
+
+如果只想构建特定目标，可通过 `-targets` 指定，例如：
+
+```bash
+go run ./tools/packager -targets linux/amd64,darwin/arm64
+```
+
+如果仍然需要单文件旧模式输出，可通过 `-output` 保持兼容，例如：
+
+```bash
+go run ./tools/packager -targets windows/amd64 -output build/gmcc.exe
+```
 
 当前 whitelist 规则为：
 

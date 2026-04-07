@@ -1,0 +1,70 @@
+name: Branch Build
+
+on:
+  push:
+    branches:
+      - feature/cluster-management
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/branch-build.yml'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'tools/**'
+      - 'frontend/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+concurrency:
+  group: branch-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm run test
+        working-directory: frontend
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Build cross-platform binaries
+        run: >-
+          go run ./tools/packager
+          -frontend-dir frontend
+          -frontend-dist frontend/dist
+          -output-dir build
+          -version "${{ github.ref_name }}-${{ github.sha }}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmcc-build-${{ github.run_number }}
+          path: build/*
+          if-no-files-found: error
+          retention-days: 7

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { apiClient } from '@/api/client'
 import { mapInstance } from '@/lib/mappers'
+import { syncCoordinator } from '@/lib/sync'
 import { useUiStore } from '@/stores/ui'
 import type { CreateInstancePayload } from '@/types/api'
 import type { LoadState, ViewInstance } from '@/types/view'
@@ -88,7 +89,7 @@ export const useInstancesStore = defineStore('instances', {
           ...this.items.filter((item) => item.id !== payload.id),
         ]
         this.state = 'success'
-        void this.loadInstances(true, true)
+        syncCoordinator.requestNow(['instances', 'overview'], 'instance-created')
         ui.notify('success', '新的出勤小队已经加入基地')
         return { valid: true, message: '' }
       } catch (error) {
@@ -115,7 +116,7 @@ export const useInstancesStore = defineStore('instances', {
         if (action === 'stop') await apiClient.stopInstance(id)
         if (action === 'restart') await apiClient.restartInstance(id)
         ui.notify('success', `实例 ${id} 已${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}`)
-        void this.loadInstances(true, true)
+        syncCoordinator.requestNow(['instances', 'overview'], `instance-${action === 'start' ? 'started' : action === 'stop' ? 'stopped' : 'restarted'}`)
       } catch (error) {
         ui.notify('error', error instanceof Error ? error.message : '实例操作失败')
         void this.loadInstances(true, true)
@@ -136,7 +137,7 @@ export const useInstancesStore = defineStore('instances', {
         await apiClient.deleteInstance(id)
         this.items = this.items.filter((item) => item.id !== id)
         this.state = 'success'
-        void this.loadInstances(true, true)
+        syncCoordinator.requestNow(['instances', 'overview'], 'instance-deleted')
         ui.notify('success', `实例 ${id} 已移出基地`)
       } catch (error) {
         ui.notify('error', error instanceof Error ? error.message : '删除实例失败')
