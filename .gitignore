@@ -47,6 +47,8 @@ go.work
 
 .session/
 logs/
+!frontend/src/components/logs/
+!frontend/src/components/logs/**
 config.yaml
 id.txt
 .knowledge/
